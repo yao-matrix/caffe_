@@ -72,7 +72,7 @@ void SpatialDropoutLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   unsigned int* mask = rand_vec_.mutable_cpu_data();
   const int num = bottom[0]->shape(0);
   const int channel = bottom[0]->shape(1);
-  size_t spatial_dim = bottom[0]->count() / (bottom[0]->shape(0) * channel)
+  size_t spatial_dim = bottom[0]->count() / (bottom[0]->shape(0) * channel);
   if (this->phase_ == TRAIN) {
     // Create random numbers
     caffe_rng_bernoulli(num * channel, 1. - threshold_, mask);
@@ -103,7 +103,7 @@ void SpatialDropoutLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     Dtype* bottom_diff = bottom[0]->mutable_cpu_diff();
     const int num = bottom[0]->num();
     const int channel = bottom[0]->channels();
-    size_t spatial_dim = bottom[0]->count() / (bottom[0]->shape(0) * channel)
+    size_t spatial_dim = bottom[0]->count() / (bottom[0]->shape(0) * channel);
     if (this->phase_ == TRAIN) {
       const unsigned int* mask = rand_vec_.cpu_data();
 #ifdef _OPENMP
