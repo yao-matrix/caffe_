@@ -336,7 +336,7 @@ void PoolingLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
       const int* input_shape_data = this->input_shape_.cpu_data();
       if (global_pooling_) {
         for (int i = 0; i < num_spatial_axes_; ++i) {
-          kernel_shape_data[i] = input_shape_data[i+1];
+          kernel_shape_data[i] = input_shape_data[i + 1];
         }
       }
       // compute output shape
