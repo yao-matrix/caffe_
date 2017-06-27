@@ -1,3 +1,4 @@
+
 /*
 All modification made by Intel Corporation: © 2016 Intel Corporation
 
@@ -34,73 +35,41 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+#ifndef COMPILE_NET_UTIL_HPP_
+#define COMPILE_NET_UTIL_HPP_
+#include "caffe/proto/caffe.pb.h"
 
-#ifndef CAFFE_SERIALIZATION_BITFIELD_HPP_
-#define CAFFE_SERIALIZATION_BITFIELD_HPP_
+namespace caffe {
+/**
+ *  @brief If CompileNet's compilation rule one does work, some scale layer's weights and bias blobs
+ *  may be merged into batch norm layer. RecoverScaleFromBN will recover the merged scale layer's info.
+ *  Currently, we only care about the weights and bias info.
+ */
+template <typename Dtype>
+void RecoverScaleFromBN(const LayerParameter& bn_layer_param, LayerParameter& scale_layer_param, Dtype default_scale_weights, Dtype default_scale_bias);
+/**
+ *  @brief rename layer1's top to layer2's
+ */
+void MergeLayer(LayerParameter &layer1, const LayerParameter &layer2);
 
-#include <vector>
-#include "caffe/util/math_functions.hpp"
+/**
+ *  @brief After removing the batch norm and scale layer after a convolution layer, to make the inference
+ *  result correct, we must adjust convolution layer's weights and bias blobs
+ */
 
-struct bitfield {
-  std::vector<unsigned char> buffer;
+template <typename Dtype>
+void AdjustConvLayer(LayerParameter &conv_layer,
+                     const LayerParameter &batch_norm_layer,
+                     const LayerParameter &scale_layer, bool is_net_init);
 
-  explicit bitfield(size_t bits)
-    : buffer((bits + __CHAR_BIT__ - 1) / __CHAR_BIT__) {
-  }
+/**
+ *  @brief The batch norm and scale layer may be merged due to compilation rule one's effect, RecoverBNScaleMergedNet
+ *  is used to recover the scale layer
+ */
+template <typename Dtype>
+void RecoverBNScaleMergedNet(NetParameter * net_param, NetParameter* recovered_net_param);
 
-  bitfield(const char* data, size_t bytes)
-    : buffer(bytes) {
-    caffe::caffe_copy<char>(
-      bytes, data, reinterpret_cast<char*>(&buffer.front()));
-  }
-
-  char* raw() {
-    return reinterpret_cast<char*>(&buffer.front());
-  }
-
-  size_t bytes() const {
-    return buffer.size();
-  }
-
-  void shift(uint32_t* bit, uint32_t* byte) {
-    if (*bit == __CHAR_BIT__ - 1) {
-      ++(*byte);
-      bit = 0;
-    } else {
-      ++(*bit);
-    }
-  }
-
-  void set_bits(int32_t val, uint32_t mask_size, uint32_t at_bit) {
-    uint32_t byte = at_bit / __CHAR_BIT__;
-    uint32_t bit = at_bit % __CHAR_BIT__;
-
-    buffer[byte] = buffer[byte] | (((val < 0) ? 1u : 0u) << bit);
-    shift(&bit, &byte);
-
-    uint32_t aux = abs(val);
-    for (int i = 0; i < mask_size; ++i) {
-      buffer[byte] = buffer[byte] | (unsigned char)((aux & 1) << bit);
-      aux >>= 1;
-      shift(&bit, &byte);
-    }
-  }
-
-  int32_t get_bits(uint32_t mask_size, uint32_t at_bit) {
-    uint32_t byte = at_bit / __CHAR_BIT__;
-    uint32_t bit = at_bit % __CHAR_BIT__;
-
-    bool negative = ((buffer[byte] >> bit) & 1) > 0;
-    shift(&bit, &byte);
-
-    uint32_t ret = (mask_size == 0) ? 1u : 0u;
-    for (int i = 0; i < mask_size; ++i) {
-      ret = ret | ((uint32_t(buffer[byte] >> bit) & 1u) << i);
-      shift(&bit, &byte);
-    }
-    return (negative) ? -int32_t(ret) : int32_t(ret);
-  }
-};
-
-#endif  // CAFFE_SERIALIZATION_BITFIELD_HPP_
-
+template <typename Dtype>
+void RemoveBNScale(const NetParameter& param, NetParameter* param_compiled);
+}
+#endif

@@ -295,19 +295,6 @@ void BaseConvolutionLayer<Dtype>::DoReshape(const vector<Blob<Dtype>*>& bottom,
     caffe_set(bias_multiplier_.count(), Dtype(1),
         bias_multiplier_.mutable_cpu_data());
   }
-
-#ifdef USE_MLSL
-  if ((this->layerOp == nullptr) && (this->phase_ == TRAIN)){
-    mn::OpRegInfo reg_info{ mn::train::get_session(), MLSL::OT_CC };
-    reg_info.set_name(this->layer_param().name());
-    reg_info.add_parameter_set<Dtype>(bottom[0]->channels() * top[0]->channels() / group_,
-                                      this->kernel_shape_.cpu_data()[0] * this->kernel_shape_.cpu_data()[1]);
-    if (bias_term_) {
-      reg_info.add_parameter_set<Dtype>(top[0]->channels(), 1);
-    }
-    this->layerOp = mn::train::add_operation(reg_info);
-  }
-#endif /* USE_MLSL */
 }
 
 template <typename Dtype>
@@ -335,8 +322,8 @@ void BaseConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   // LOG(ERROR) << "final thread number: " << num_of_threads_;
 #endif
 
-  size_t col_buffer_mt_size = num_of_threads_ * static_cast<size_t>(col_buffer_.count());
-  size_t weight_diff_mt_size = num_of_threads_ * static_cast<size_t>(this->blobs_[0]->count());
+  col_buffer_mt_size = num_of_threads_ * static_cast<size_t>(col_buffer_.count());
+  weight_diff_mt_size = num_of_threads_ * static_cast<size_t>(this->blobs_[0]->count());
 
   col_buffer_mt_.resize(col_buffer_mt_size);
   weight_diff_mt_.resize(weight_diff_mt_size);

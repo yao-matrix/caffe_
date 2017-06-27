@@ -198,8 +198,13 @@ void MKLDNNLRNLayer<Dtype>::InitLRNFwd(const vector<Blob<Dtype>*>& bottom, const
     } else {
         lrnFwd.reset(new lrn_forward(*lrnFwd_pd, *fwd_bottom_data_primitive, *fwd_top_data_memory));
     }
-    fwd_bottom_data->set_mkldnn_primitive(lrnFwd);
-    fwd_top_data->set_mkldnn_primitive(lrnFwd);
+    //fwd_bottom_data->set_mkldnn_primitive(lrnFwd);      //Wrong passed primitive! (TODO: Checking!)
+    MKLDNNPrimitive<Dtype> fwd_bottom_data_primitive_transfer(fwd_bottom_data_primitive);
+    fwd_bottom_data->set_mkldnn_primitive(fwd_bottom_data_primitive_transfer);
+
+    //fwd_top_data->set_mkldnn_primitive(lrnFwd);         //Wrong passed primitive! (TODO: Checking!)
+    MKLDNNPrimitive<Dtype> fwd_top_data_memory_transfer(fwd_top_data_memory);
+    fwd_top_data->set_mkldnn_primitive(fwd_top_data_memory_transfer);
 }
 
 
@@ -256,11 +261,47 @@ void MKLDNNLRNLayer<Dtype>::InitLRNBwd(const vector<Blob<Dtype>*>& top
     if (top_diff_is_prv) {
         shared_ptr<MKLDNNMemoryDescriptor<Dtype, true> > mem_descr
             = get_mkldnn_prv_descriptor<Dtype, true>(top[0]);
+        memory::format bwd_prv_top_diff_mfmt = static_cast<memory::format>(mem_descr->prv_memory_pd()->desc().data.format);
+#ifdef DEBUG
+        LOG(INFO) << "MKLDNNLRNLayer<Dtype>::InitLRNBwd: memory format of prv top diff is: " << bwd_prv_top_diff_mfmt;
+#endif        
         top_diff_md.reset(new memory::desc(mem_descr->prv_memory_pd()->desc()));
         usr_diff_mpd = mem_descr->usr_memory_pd();
         prv_diff_mpd = mem_descr->prv_memory_pd();
+
+        bool bottom_data_is_prv = (const_cast<Dtype*>(bottom[0]->prv_data()) != NULL);
+        if (bottom_data_is_prv) {
+            shared_ptr<MKLDNNMemoryDescriptor<Dtype, false> > mem_descr
+                = get_mkldnn_prv_descriptor<Dtype, false>(bottom[0]);
+            memory::format fwd_prv_bottom_data_mfmt = static_cast<memory::format>(mem_descr->prv_memory_pd()->desc().data.format);
+#ifdef DEBUG
+            LOG(INFO) << "MKLDNNLRNLayer<Dtype>::InitLRNBwd: memory format of prv bottom data is: " << fwd_prv_bottom_data_mfmt;
+#endif
+            if (bwd_prv_top_diff_mfmt != fwd_prv_bottom_data_mfmt)
+            {
+#ifdef DEBUG
+                LOG(INFO) << "MKLDNNLRNLayer<Dtype>::InitLRNBwd: Reorder the prv top/bottom diff to the format of prv bottom data! (Performance consideration)";
+#endif
+                top_diff_md.reset(new memory::desc({tz}, mpcsn, fwd_prv_bottom_data_mfmt));
+            }
+            //top[0]->set_prv_diff_descriptor(NULL);
+        }
     } else {
-        top_diff_md.reset(new memory::desc({tz}, mpcsn, memory::format::nchw));
+        memory::format bwd_cmfmt = memory::format::nchw;
+        bool bottom_data_is_prv = (const_cast<Dtype*>(bottom[0]->prv_data()) != NULL);
+        if (bottom_data_is_prv) {
+            shared_ptr<MKLDNNMemoryDescriptor<Dtype, false> > mem_descr
+                = get_mkldnn_prv_descriptor<Dtype, false>(bottom[0]);
+            memory::format fwd_prv_bottom_data_mfmt = static_cast<memory::format>(mem_descr->prv_memory_pd()->desc().data.format);
+#ifdef DEBUG
+            LOG(INFO) << "MKLDNNLRNLayer<Dtype>::InitLRNBwd: memory format of prv bottom data is: " << fwd_prv_bottom_data_mfmt;
+            LOG(INFO) << "MKLDNNLRNLayer<Dtype>::InitLRNBwd: Reorder the usr top/bottom diff to the format of prv bottom data! (Performance consideration)";
+#endif
+            bwd_cmfmt = fwd_prv_bottom_data_mfmt;
+            //top[0]->set_prv_diff_descriptor(NULL);
+        }
+
+        top_diff_md.reset(new memory::desc({tz}, mpcsn, bwd_cmfmt));
         usr_diff_mpd.reset(new memory::primitive_desc(*top_diff_md, cpu_engine));
     }
     bottom_diff_md = top_diff_md;
@@ -304,8 +345,13 @@ void MKLDNNLRNLayer<Dtype>::InitLRNBwd(const vector<Blob<Dtype>*>& top
     bwd_top_diff_primitive = bwd_top_diff->create_input(false);
 
     lrnBwd.reset(new lrn_backward(*lrnBwd_pd, *fwd_bottom_data_primitive, *bwd_top_diff_primitive, *scratch_memory, *bwd_bottom_diff_memory));
-    bwd_bottom_diff->set_mkldnn_primitive(lrnBwd);
-    bwd_top_diff->set_mkldnn_primitive(lrnBwd);
+    //bwd_bottom_diff->set_mkldnn_primitive(lrnBwd);        //Wrong passed primitive! (TODO: Checking!)
+    MKLDNNPrimitive<Dtype> bwd_bottom_diff_memory_transfer(bwd_bottom_diff_memory);
+    bwd_bottom_diff->set_mkldnn_primitive(bwd_bottom_diff_memory_transfer);
+
+    //bwd_top_diff->set_mkldnn_primitive(lrnBwd);           //Wrong passed primitive! (TODO: Checking!)
+    MKLDNNPrimitive<Dtype> bwd_top_diff_primitive_transfer(bwd_top_diff_primitive);
+    bwd_top_diff->set_mkldnn_primitive(bwd_top_diff_primitive_transfer);
 }
 
 

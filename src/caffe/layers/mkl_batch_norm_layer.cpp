@@ -221,22 +221,20 @@ void MKLBatchNormLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
 template <typename Dtype>
 void MKLBatchNormLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
-  bool reshaping = true;
+  bool re_init = true;
   if (num_spatial_axes_ == 2) {
-    if ((num_ == bottom[0]->shape(0)) &&
-        channels_ == bottom[0]->shape(1) &&
+    if (channels_ == bottom[0]->shape(1) &&
         height_ == bottom[0]->shape(2) &&
         width_ == bottom[0]->shape(3)) {
-      reshaping = false;
+      re_init = false;
     }
   } else {
     const int* bottom_dims = bottom[0]->shape().data();
-    if ((num_ == bottom_dims[0]) &&
-        channels_ == bottom_dims[1] &&
+    if (channels_ == bottom_dims[1] &&
         depth_ == bottom_dims[2] &&
         height_ == bottom_dims[3] &&
         width_ == bottom_dims[4]) {
-      reshaping = false;
+      re_init = false;
     }
   }
 
@@ -246,8 +244,52 @@ void MKLBatchNormLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
     top[0]->ReshapeLike(*bottom[0]);
   }
 
-  if (reshaping == true) {
+  if (re_init == true) {
     Init(bottom, top);
+  } else if (num_ != bottom[0]->shape(0)) {
+    size_t dim = 4, sizes[4], strides[4];
+    if (num_spatial_axes_ == 2) {
+      num_      = bottom[0]->shape(0);
+      channels_ = bottom[0]->shape(1);
+      height_   = bottom[0]->shape(2);
+      width_    = bottom[0]->shape(3);
+
+      sizes[0] = width_;
+      sizes[1] = height_;
+      sizes[2] = channels_;
+      sizes[3] = num_;
+
+      strides[0] = 1;
+      strides[1] = sizes[0];
+      strides[2] = sizes[0] * sizes[1];
+      strides[3] = sizes[0] * sizes[1] * sizes[2];
+    } else {
+      const int* bottom_dims = bottom[0]->shape().data();
+      num_      = bottom_dims[0];
+      channels_ = bottom_dims[1];
+      depth_    = bottom_dims[2];
+      height_   = bottom_dims[3];
+      width_    = bottom_dims[4];
+
+      sizes[0] = height_ * width_;
+      sizes[1] = depth_;
+      sizes[2] = channels_;
+      sizes[3] = num_;
+
+      strides[0] = 1;
+      strides[1] = sizes[0];
+      strides[2] = sizes[0] * sizes[1];
+      strides[3] = sizes[0] * sizes[1] * sizes[2];
+    }
+
+    dnnError_t e;
+    dnnLayoutDelete<Dtype>(layout_usr_);
+    e = dnnLayoutCreate<Dtype>(&layout_usr_, dim, sizes, strides);
+    CHECK_EQ(e, E_SUCCESS);
+    fwd_bottom_data->create_user_layout(dim, sizes, strides, false);
+    fwd_top_data   ->create_user_layout(dim, sizes, strides, false);
+    bwd_bottom_diff->create_user_layout(dim, sizes, strides, false);
+    bwd_top_diff   ->create_user_layout(dim, sizes, strides, false);
   }
 }
 

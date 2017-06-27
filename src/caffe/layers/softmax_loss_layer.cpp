@@ -134,17 +134,16 @@ void SoftmaxWithLossLayer<Dtype>::Forward_cpu(
   const Dtype* label = bottom[1]->cpu_data();
   int dim = prob_.count() / outer_num_;
   int count = 0;
-  Dtype loss = Dtype(0);
-
+  Dtype loss = 0;
   if (bottom.size() == 3) {
       const Dtype* weights = bottom[2]->cpu_data();
-      Dtype weighted_sum = Dtype(0);
-      Dtype weighted_sum_local = Dtype(0);
-      Dtype loss_local = Dtype(0);
+      Dtype weighted_sum = 0;
+      Dtype weighted_sum_local = 0;
+      Dtype loss_local = 0;
 
       for (int i = 0; i < outer_num_; ++i) {
-        weighted_sum_local = Dtype(0);
-        loss_local = Dtype(0);
+        weighted_sum_local = 0;
+        loss_local = 0;
 
         #ifdef _OPENMP
         #pragma omp parallel for reduction(+: loss_local, weighted_sum_local) if(inner_num_ > 1)
@@ -171,14 +170,14 @@ void SoftmaxWithLossLayer<Dtype>::Forward_cpu(
       top[0]->mutable_cpu_data()[0] = loss / weighted_sum;
       if (top.size() == 2) {
         top[1]->ShareData(prob_);
-      } 
+      }
   } else {
       int count_local = 0;
-      Dtype loss_local = Dtype(0);
+      Dtype loss_local = 0;
 
       for (int i = 0; i < outer_num_; ++i) {
         count_local = 0;
-        loss_local = Dtype(0);
+        loss_local = 0;
 
         #ifdef _OPENMP
         #pragma omp parallel for reduction(+: loss_local, count_local) if(inner_num_ > 1)
@@ -281,7 +280,7 @@ void SoftmaxWithLossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
         }
         // Scale gradient
         Dtype loss_weight = top[0]->cpu_diff()[0] / weight_sum;
-        caffe_scal(prob_.count(), loss_weight, bottom_diff); 
+        caffe_scal(prob_.count(), loss_weight, bottom_diff);
     } else {
         Dtype* bottom_diff = bottom[0]->mutable_cpu_diff();
         const Dtype* prob_data = prob_.cpu_data();

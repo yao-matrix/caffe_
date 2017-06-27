@@ -55,8 +55,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define LOG_BLOB(layer, blob, part, blob_id, description)              \
   do                                                                   \
   {                                                                    \
-      long elems_to_log = std::min(static_cast<long>(MAX_ELEMS_TO_LOG), blob->count());    \
-      for (long idx = 0; idx < elems_to_log; idx++)                     \
+      size_t elems_to_log = std::min(static_cast<size_t>(MAX_ELEMS_TO_LOG), blob->count());    \
+      for (size_t idx = 0; idx < elems_to_log; idx++)                     \
       {                                                                \
           LOG_LAYER(layer) << description                              \
                            << ", blob_id " << blob_id                  \
@@ -68,8 +68,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define LOG_PARAM_BLOB(blob, part, blob_id, description)               \
   do                                                                   \
   {                                                                    \
-      long elems_to_log = std::min(static_cast<long>(MAX_ELEMS_TO_LOG), blob->count());    \
-      for (long idx = 0; idx < elems_to_log; idx++)                     \
+      size_t elems_to_log = std::min(static_cast<size_t>(MAX_ELEMS_TO_LOG), blob->count());    \
+      for (size_t idx = 0; idx < elems_to_log; idx++)                     \
       {                                                                \
           DLOG(INFO) << description                                    \
                      << ", blob_id " << blob_id                        \
@@ -85,7 +85,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
           /*LOG(WARNING) << "skip NULL buffer";*/                \
           break;                                             \
       }                                                      \
-      for (int idx = 0; idx < MAX_ELEMS_TO_LOG; idx++)       \
+      for (size_t idx = 0; idx < MAX_ELEMS_TO_LOG; idx++)       \
       {                                                      \
           LOG_LAYER(layer) << description                    \
                            << ", buffer_id " << buffer_id    \
@@ -119,6 +119,15 @@ class Layer {
 
 public:
 	MLSL::Operation *layerOp{ nullptr };
+  mn::Distribution &GetDistribution();
+  virtual bool ParamNeedReduce(int param_id) { return true; }
+
+protected:
+  virtual bool Bypass(const vector<Blob<Dtype>*>& bottom,
+                      const vector<Blob<Dtype>*>& top);
+
+  virtual void MultinodeSetUp(const vector<Blob<Dtype>*>& bottom,
+                              const vector<Blob<Dtype>*>& top);
 
 #endif /* USE_MLSL */
 
@@ -164,6 +173,9 @@ public:
     LayerSetUp(bottom, top);
     Reshape(bottom, top);
     SetLossWeights(top);
+#ifdef USE_MLSL
+    MultinodeSetUp(bottom, top);
+#endif
   }
 
   /**
@@ -558,6 +570,12 @@ inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
   Lock();
   Dtype loss = 0;
   Reshape(bottom, top);
+#ifdef USE_MLSL
+  if (Bypass(bottom, top)) {
+    Unlock();
+    return loss;
+  }
+#endif
   switch (Caffe::mode()) {
   case Caffe::CPU:
     Forward_cpu(bottom, top);
@@ -599,6 +617,9 @@ template <typename Dtype>
 inline void Layer<Dtype>::Backward(const vector<Blob<Dtype>*>& top,
     const vector<bool>& propagate_down,
     const vector<Blob<Dtype>*>& bottom) {
+#ifdef USE_MLSL
+  if (Bypass(bottom, top)) return;
+#endif
   switch (Caffe::mode()) {
   case Caffe::CPU:
     Backward_cpu(top, propagate_down, bottom);

@@ -35,69 +35,36 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef CAFFE_SERIALIZATION_BLOBCODEC_HPP_
-#define CAFFE_SERIALIZATION_BLOBCODEC_HPP_
+#ifndef _CAFFE_MULTINODE_APPLY_MN_PARAM_HPP_
+#define _CAFFE_MULTINODE_APPLY_MN_PARAM_HPP_
 
-#include <boost/function.hpp>
-#include <boost/optional.hpp>
-#include <algorithm>
-#include <numeric>
-#include "caffe/blob.hpp"
+#ifdef USE_MLSL
+
 #include "caffe/proto/caffe.pb.h"
+#include "caffe/net.hpp"
 
 namespace caffe {
-
+/**
+ * @brief Apply the multinode parameters to the NetParameter
+ *        inserting mn_activation layer if needed.
+ */
 template <typename Dtype>
-class Net;
+void ApplyMultinodeParams(const NetParameter& param,
+    NetParameter* param_with_mn);
 
-struct BlobEncoding {
-  enum What {
-    PARAMS = 0,
-    GRADS = 1
-  };
-};
-typedef BlobEncoding::What BlobEncodingWhat;
-
+/**
+ * @brief Copy per-layer parameters from a Net object.
+ */
 template <typename Dtype>
-class BlobCodec {
- public:
-  typedef typename BlobEncoding::What What;
-  static shared_ptr<BlobCodec> create_codec(
-    const MultinodeParameter& param,
-    bool ensure_is_single_threaded);
+void CopyMultinodeParamsFromNet(const Net<Dtype> *net, NetParameter *param);
 
-  virtual uint32_t encode(BlobUpdate* msg,
-                          const Blob<Dtype>* src,
-                          What what,
-                          uint32_t part) const = 0;
-
-  virtual bool decode(const BlobUpdate& update,
-                      Blob<Dtype>* dest,
-                      What what,
-                      Dtype alpha,
-                      Dtype beta) const = 0;
-
-  virtual size_t max_elements_per_part() const = 0;
-  virtual size_t packet_size() const = 0;
-};
-
+/**
+ * @brief Revert all the multinode changes from NetParameter
+ */
 template <typename Dtype>
-double check_sum(const Dtype* data, size_t size) {
-  if (size == 0) return 0.0;
-  if (size == 1) return *data;
-  if (size == 2) return static_cast<double>(data[0]) + data[1];
-  return check_sum(data, size / 2)
-    + check_sum(data + size / 2, size - size / 2);
+void RevertMultinodeParams(NetParameter* param, bool write_diff = false);
 }
 
-template <typename Dtype>
-double check_sum(Blob<Dtype>* blob, BlobEncodingWhat what) {
-  return check_sum(
-    ((what == BlobEncoding::PARAMS) ?  blob->cpu_data() : blob->cpu_diff()),
-    blob->count());
-}
+#endif // USE_MLSL
 
-}  // namespace caffe
-
-#endif  // CAFFE_SERIALIZATION_BLOBCODEC_HPP_
-
+#endif // _CAFFE_MULTINODE_APPLY_MN_PARAM_HPP_

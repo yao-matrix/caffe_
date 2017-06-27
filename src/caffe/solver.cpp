@@ -54,8 +54,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/util/performance.hpp"
 #include "caffe/util/upgrade_proto.hpp"
 
-#include "caffe/util/benchmark.hpp"
+#ifdef USE_MLSL
 #include "caffe/multinode/mlsl.hpp"
+#endif
 
 namespace caffe {
 
@@ -402,10 +403,17 @@ void Solver<Dtype>::InitTimers() {
   this->forward_time_per_layer.resize(layer_count, 0.0);
   this->backward_time_per_layer.resize(layer_count, 0.0);
   this->update_time_per_layer.resize(layer_count, 0.0);
-
+#ifdef USE_MLSL
+  this->startcomm_time_per_layer.resize(layer_count, 0.0);
+  this->waitcomm_time_per_layer.resize(layer_count, 0.0);
+#endif
   this->forward_time_per_layer_total.resize(layer_count, 0.0);
   this->backward_time_per_layer_total.resize(layer_count, 0.0);
   this->update_time_per_layer_total.resize(layer_count, 0.0);
+#ifdef USE_MLSL
+  this->startcomm_time_per_layer_total.resize(layer_count, 0.0);
+  this->waitcomm_time_per_layer_total.resize(layer_count, 0.0);
+#endif
 }
 
 template <typename Dtype>
@@ -427,6 +435,19 @@ void Solver<Dtype>::ResetTimers() {
                  this->update_time_per_layer.begin(),
                  this->update_time_per_layer_total.begin(),
                  std::plus<int>());
+#ifdef USE_MLSL
+  std::transform(this->startcomm_time_per_layer_total.begin(),
+                 this->startcomm_time_per_layer_total.end(),
+                 this->startcomm_time_per_layer.begin(),
+                 this->startcomm_time_per_layer_total.begin(),
+                 std::plus<int>());
+
+  std::transform(this->waitcomm_time_per_layer_total.begin(),
+                 this->waitcomm_time_per_layer_total.end(),
+                 this->waitcomm_time_per_layer.begin(),
+                 this->waitcomm_time_per_layer_total.begin(),
+                 std::plus<int>());
+#endif
 
   std::fill(this->forward_time_per_layer.begin(),
           this->forward_time_per_layer.end(), 0);
@@ -434,6 +455,12 @@ void Solver<Dtype>::ResetTimers() {
           this->backward_time_per_layer.end(), 0);
   std::fill(this->update_time_per_layer.begin(),
           this->update_time_per_layer.end(), 0);
+#ifdef USE_MLSL
+  std::fill(this->startcomm_time_per_layer.begin(),
+          this->startcomm_time_per_layer.end(), 0);
+  std::fill(this->waitcomm_time_per_layer.begin(),
+          this->waitcomm_time_per_layer.end(), 0);
+#endif
 }
 
 template <typename Dtype>
@@ -452,7 +479,13 @@ void Solver<Dtype>::PrintTimers(bool printTotal) {
         backward_time_per_layer_total : backward_time_per_layer;
     std::vector<double>& update_timers = printTotal ?
         update_time_per_layer_total : update_time_per_layer;
+#ifdef USE_MLSL
+    std::vector<double>& startcomm_timers = printTotal ?
+        startcomm_time_per_layer_total : startcomm_time_per_layer;
+    std::vector<double>& waitcomm_timers = printTotal ?
+        waitcomm_time_per_layer_total : waitcomm_time_per_layer;
     std::string prefix = printTotal ? "TOTAL " : "DELTA ";
+#endif
 
     double forward_time = std::accumulate(forward_timers.begin(),
             forward_timers.end(), 0) / 1000;
@@ -487,8 +520,37 @@ void Solver<Dtype>::PrintTimers(bool printTotal) {
     }
     LOG(WARNING) << std::endl;
 
-    LOG(WARNING) << prefix << "TIME (F+B+U): " << (forward_time +
-            backward_time + update_time) / 1000 << " sec";
+#ifdef USE_MLSL
+    double startcomm_time = std::accumulate(startcomm_timers.begin(),
+            startcomm_timers.end(), 0) / 1000;
+    LOG(WARNING) << prefix << "START COMMUNICATION TIME: " << startcomm_time << " ms";
+    for (int layer_idx = 0; layer_idx < net_->layers().size(); layer_idx++) {
+        LOG(WARNING) << "LAYER-" << layer_idx << " "
+                     << net_->layers()[layer_idx]->type()
+                     << ": startcomm_time: " << startcomm_timers[layer_idx] / 1000
+                     << " ms";
+    }
+    LOG(WARNING) << std::endl;
+
+    double waitcomm_time = std::accumulate(waitcomm_timers.begin(),
+            waitcomm_timers.end(), 0) / 1000;
+    LOG(WARNING) << prefix << "WAIT COMMUNICATION TIME: " << waitcomm_time << " ms";
+    for (int layer_idx = 0; layer_idx < net_->layers().size(); layer_idx++) {
+        LOG(WARNING) << "LAYER-" << layer_idx << " "
+                     << net_->layers()[layer_idx]->type()
+                     << ": waitcomm_time: " << waitcomm_timers[layer_idx] / 1000
+                     << " ms";
+    }
+    LOG(WARNING) << std::endl;
+
+    LOG(WARNING) << prefix << "TIME (Computation + Communication): " << (forward_time +
+        backward_time + update_time + startcomm_time + waitcomm_time) / 1000
+        << " sec";
+#else
+    LOG(WARNING) << prefix << "TIME (Computation): " << (forward_time +
+        backward_time + update_time) / 1000 << " sec";
+#endif
+
     LOG(WARNING) << "####################################################";
     LOG(WARNING) << std::endl;
 }
@@ -540,17 +602,20 @@ void Solver<Dtype>::Solve(const char* resume_file) {
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << smoothed_loss_;
   }
 
-#ifdef USE_MLSL
   // in multinode last test must be done after weights update
   if (param_.test_interval() && iter_ % param_.test_interval() == 0)
     TestAll();
-#endif
 
   LOG(INFO) << "Optimization Done.";
 }
 
 template <typename Dtype>
 void Solver<Dtype>::TestAll() {
+#ifdef USE_MLSL
+  for (int i = 0; i < callbacks_.size(); ++i) {
+    callbacks_[i]->on_before_test();
+  }
+#endif
   for (int test_net_id = 0;
        test_net_id < test_nets_.size() && !requested_early_exit_;
        ++test_net_id) {
@@ -562,6 +627,11 @@ void Solver<Dtype>::TestAll() {
       LOG(FATAL) << "Unknown evaluation type: " << param_.eval_type();
     }
   }
+#ifdef USE_MLSL
+  for (int i = 0; i < callbacks_.size(); ++i) {
+    callbacks_[i]->on_after_test();
+  }
+#endif
 }
 
 template <typename Dtype>
@@ -779,8 +849,8 @@ void Solver<Dtype>::Snapshot() {
   CHECK(Caffe::root_solver());
 
 #ifdef USE_MLSL
-  if (mn::get_node_id() != 0) {
-    return;
+  for (int i = 0; i < callbacks_.size(); ++i) {
+    callbacks_[i]->on_before_snapshot();
   }
 #endif /* USE_MLSL */
 
@@ -797,6 +867,12 @@ void Solver<Dtype>::Snapshot() {
   }
 
   SnapshotSolverState(model_filename);
+
+#ifdef USE_MLSL
+  for (int i = 0; i < callbacks_.size(); ++i) {
+    callbacks_[i]->on_after_snapshot();
+  }
+#endif
 }
 
 template <typename Dtype>

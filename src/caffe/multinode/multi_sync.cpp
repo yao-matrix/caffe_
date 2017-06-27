@@ -44,24 +44,28 @@ namespace caffe {
 template<typename Dtype>
 MultiSync<Dtype>::MultiSync(shared_ptr<Solver<Dtype> > root_solver)
         : solver(boost::make_shared<MultiSolver<Dtype> >(root_solver)),
-          snapshot_per_iters(root_solver->param().snapshot()),
           layers(root_solver->net()->layers()),
           net(root_solver->net()),
           net_params(root_solver->net()->learnable_params()) {
   root_solver->param().set_disabled_update(true);
-  if (!is_root) root_solver->param().clear_snapshot();
-  if (!is_root) root_solver->param().set_snapshot_after_train(false);
 
   if (root_solver->iter() == 0)
     root_solver->set_iter(1);
 
   layer_param_ids.resize(layers.size());
+#ifdef FW_OVERLAP_OPT
+  param_ids_finished_flags.resize(layers.size());
+#endif
 
   for (int layer_id = 0; layer_id < layers.size(); layer_id++) {
     shared_ptr<Layer<Dtype> > layer = layers[layer_id];
 
     /* cache param ids */
     layer_param_ids[layer_id] = net->get_layer_learnable_param_ids(layer_id);
+#ifdef FW_OVERLAP_OPT
+    param_ids_finished_flags[layer_id].resize(layer_param_ids[layer_id].size());
+    std::fill(param_ids_finished_flags[layer_id].begin(), param_ids_finished_flags[layer_id].end(), false);
+#endif
   }
 }
 

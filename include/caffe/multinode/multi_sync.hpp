@@ -63,22 +63,24 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace caffe {
 
-#define CAN_USE_PRV(param) false //(param->prv_diff() && (param->prv_diff_count() == param->count()))
-
-  inline bool is_root() {
-    return mn::get_node_id() == 0;
-  }
+#define CAN_USE_PRV(param) (param->prv_diff() && (param->prv_diff_count() == param->count()))
 
   template <typename Dtype>
   class MultiSync : public MultiSolver<Dtype>::Callback {
 
     boost::shared_ptr<MultiSolver<Dtype>> solver;
-    int snapshot_per_iters;
 
     vector<shared_ptr<Layer<Dtype>>> layers;
     shared_ptr<Net<Dtype>> net;
     const vector<Blob<Dtype> *> &net_params;
     vector<vector<int>> layer_param_ids;
+#ifdef FW_OVERLAP_OPT
+    vector<vector<bool>> param_ids_finished_flags;
+#endif
+
+    // layer_id -> blob_id -> cached blob to restore
+    // statistics
+    vector<vector<shared_ptr<Blob<Dtype>>>> cached_stats;
 
 #ifdef PERFORMANCE_MONITORING
     #define STATS_OUTPUT_FILE "mlsl_stats.txt"
@@ -106,24 +108,65 @@ namespace caffe {
     virtual ~MultiSync() {
     }
 
-    void snapshot() {
-      if (is_root()) {
-        solver->root_solver()->Snapshot();
+    void synchronize_parameters() {
+      LOG(INFO) << "synchronize_params: bcast";
+      for (int i = 0; i < layers.size(); i++) {
+        mn::Distribution &distrib = layers[i]->GetDistribution();
+        for (int j = 0; j < layer_param_ids[i].size(); j++) {
+          int layer_param_id = layer_param_ids[i][j];
+          distrib.bcast<Dtype,MLSL::GT_DATA>(
+            net_params[layer_param_id]->mutable_cpu_data(),
+            net_params[layer_param_id]->count());
+        }
       }
     }
 
-    void synchronize_parameters() {
-      LOG(WARNING) << "synchronize_params: bcast";
-      for (int idx = 0; idx < net_params.size(); ++idx) {
-        mn::bcast(net_params[idx]->mutable_cpu_data(), net_params[idx]->count());
+    void synchronize_statistics() {
+      cached_stats.resize(layers.size());
+      for (int i = 0; i < layers.size(); i++) {
+        if (string(layers[i]->type()) == "BatchNorm" &&
+            !layers[i]->layer_param().batch_norm_param().use_global_stats()) {
+          vector<shared_ptr<Blob<Dtype>>> cached_blobs;
+          // 3 blobs: mean, variance and scaling factor
+          for (int j = 0; j < layer_param_ids[i].size() && j < 3; j++) {
+            shared_ptr<Blob<Dtype>> b = shared_ptr<Blob<Dtype>>(new Blob<Dtype>());
+            Blob<Dtype> *net_param = net_params[layer_param_ids[i][j]];
+            b->ReshapeLike(*net_param);
+            b->CopyFrom(*net_param);
+            cached_blobs.push_back(b);
+            mn::Distribution &distrib = layers[i]->GetDistribution();
+            distrib.allreduce<Dtype,MLSL::RT_SUM,MLSL::GT_DATA>(
+              net_param->mutable_cpu_data(), net_param->mutable_cpu_data(),
+              net_param->count());
+          }
+          cached_stats[i] = cached_blobs;
+        }
       }
+    }
 
+    void restore_statistics() {
+      for (int i = 0; i < layers.size(); i++) {
+        if (string(layers[i]->type()) == "BatchNorm" &&
+          !layers[i]->layer_param().batch_norm_param().use_global_stats()) {
+          // 3 blobs: mean, variance and scaling factor
+          for (int j = 0; j < layer_param_ids[i].size() && j < 3; j++) {
+            Blob<Dtype> *net_param = net_params[layer_param_ids[i][j]];
+            net_param->CopyFrom(*cached_stats[i][j]);
+          }
+        }
+      }
     }
 
     void run() {
       LOG(WARNING) << "RUN: "
                    << "PER LAYER TIMINGS ARE"
 #ifdef CAFFE_PER_LAYER_TIMINGS
+                   << " ENABLED"
+#else
+                   << " DISABLED"
+#endif
+                   << ", FORWARD OVERLAP OPTIMIZATION IS"
+#ifdef FW_OVERLAP_OPT
                    << " ENABLED"
 #else
                    << " DISABLED"
@@ -139,24 +182,16 @@ namespace caffe {
       mn::train::commit();
 
 #ifdef PERFORMANCE_MONITORING
-  statsIterResult.resize(caffe::mn::train::get_session().get_operation_count());
-  caffe::mn::train::stats::start();
+      statsIterResult.resize(caffe::mn::train::get_session().get_operation_count());
+      caffe::mn::train::stats::start();
 #endif
 
       solver->add_callback(this);
       solver->Solve();
 
 #ifdef PERFORMANCE_MONITORING
-    dump_stats_to_file();
+      dump_stats_to_file();
 #endif
-    }
-
-    void check_snapshot() {
-      if (is_root()) {
-        if ((snapshot_per_iters != 0) && (solver->root_solver()->iter() % snapshot_per_iters == 0)) {
-          solver->root_solver()->Snapshot();
-        }
-      }
     }
 
     void apply_updates(int layer_id) {
@@ -167,17 +202,28 @@ namespace caffe {
     }
 
     void on_start() {
-      check_snapshot();
       DLOG(INFO) << "started iteration " << solver->root_solver()->iter();
     }
 
     void on_iter_finished(int layer_id) {
+#ifdef FW_OVERLAP_OPT
+      solver->set_layer_finished_flag(layer_id, false);
+#endif
+
       boost::shared_ptr<Layer<Dtype>> &layer = layers[layer_id];
       if (layer->layerOp == nullptr) {
         return;
       }
+
+#ifdef FW_OVERLAP_OPT
+      std::fill(param_ids_finished_flags[layer_id].begin(),
+          param_ids_finished_flags[layer_id].end(),
+          false);
+#endif
+
       std::vector<int> &param_ids = layer_param_ids[layer_id];
       for (int i = 0; i < param_ids.size(); ++i) {
+        if (!layer->ParamNeedReduce(i)) continue;
         if (CAN_USE_PRV(net_params[param_ids[i]])) {
           layer->layerOp->GetParameterSet(i)->StartGradientComm((void *) net_params[param_ids[i]]->mutable_prv_diff());
         } else {
@@ -189,30 +235,59 @@ namespace caffe {
     void on_delwt_wait(int layer_id) {
       boost::shared_ptr<Layer<Dtype>> &layer = layers[layer_id];
       if (layer->layerOp == nullptr) {
+#ifdef FW_OVERLAP_OPT
+        solver->set_layer_finished_flag(layer_id, true);
+#endif
         return;
       }
-      std::vector<int> &param_ids = layer_param_ids[layer_id];
 
-      for (int i = 0; i < param_ids.size(); ++i) {
+      std::vector<int> &param_ids = layer_param_ids[layer_id];
+      for (int i=0; i<param_ids.size(); i++) {
+        if (!layer->ParamNeedReduce(i)
+#ifdef FW_OVERLAP_OPT
+            || (param_ids_finished_flags[layer_id][i] == true)) {
+          param_ids_finished_flags[layer_id][i] = true;
+#else
+          ) {
+#endif
+          continue;
+        }
+
+#ifdef FW_OVERLAP_OPT
+        bool is_completed = false;
+        Dtype *delwt_buf{(Dtype *) layer->layerOp->GetParameterSet(i)->TestGradientComm(&is_completed)};
+#else
         Dtype *delwt_buf{(Dtype *) layer->layerOp->GetParameterSet(i)->WaitGradientComm()};
+#endif
         if (delwt_buf) {
+#ifdef FW_OVERLAP_OPT
+          assert(is_completed);
+          param_ids_finished_flags[layer_id][i] = true;
+#endif
           if (CAN_USE_PRV(net_params[param_ids[i]])) {
             if (delwt_buf != net_params[param_ids[i]]->prv_diff())
               caffe_copy(net_params[param_ids[i]]->count(),
-                         delwt_buf,
-                         net_params[param_ids[i]]->mutable_prv_diff());
+                  delwt_buf,
+                  net_params[param_ids[i]]->mutable_prv_diff());
           } else if (delwt_buf != net_params[param_ids[i]]->cpu_diff())
             caffe_copy(net_params[param_ids[i]]->count(),
-                       delwt_buf,
-                       net_params[param_ids[i]]->mutable_cpu_diff());
-
+                delwt_buf,
+                net_params[param_ids[i]]->mutable_cpu_diff());
         }
       }
+
+#ifdef FW_OVERLAP_OPT
+      int finished_count = std::count(param_ids_finished_flags[layer_id].begin(),
+            param_ids_finished_flags[layer_id].end(), true);
+      if (finished_count == param_ids.size()) {
+        solver->set_layer_finished_flag(layer_id, true);
+      }
+#endif
     }
 
     void on_gradients_ready() {
       DLOG(INFO) << "finished iteration " << solver->root_solver()->iter();
-      
+
 #ifdef PERFORMANCE_MONITORING
       caffe::mn::train::stats::stop();
 
@@ -238,6 +313,23 @@ namespace caffe {
       caffe::mn::train::stats::reset();
       caffe::mn::train::stats::start();
 #endif //PERFORMANCE_MONITORING
+    }
+
+    void on_before_test() {
+      synchronize_statistics();
+      synchronize_parameters();
+    }
+
+    void on_after_test() {
+      restore_statistics();
+    }
+
+    void on_before_snapshot() {
+      synchronize_statistics();
+    }
+
+    void on_after_snapshot() {
+      restore_statistics();
     }
 
 #ifdef PERFORMANCE_MONITORING

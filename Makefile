@@ -64,6 +64,9 @@ endif
 #################### MLSL ####################
 
 ifeq ($(USE_MLSL), 1)
+	RETURN_STRING=$(shell ./external/mlsl/prepare_mlsl.sh)
+	MLSL_ROOT=$(firstword $(RETURN_STRING))
+	MLSL_LDFLAGS=$(lastword $(RETURN_STRING))
 	COMMON_FLAGS += -DUSE_MLSL=1
 	LIBRARIES += mlsl
 	INCLUDE_DIRS += $(MLSL_ROOT)/intel64/include
@@ -74,11 +77,13 @@ ifeq ($(CAFFE_PER_LAYER_TIMINGS), 1)
 endif
 
 ifeq ($(CAFFE_MLSL_SHUFFLE), 1)
-        COMMON_FLAGS += -DCAFFE_MLSL_SHUFFLE
+	COMMON_FLAGS += -DCAFFE_MLSL_SHUFFLE
 endif
 
+ifeq ($(FW_OVERLAP_OPT), 1)
+	COMMON_FLAGS += -DFW_OVERLAP_OPT
 endif
-
+endif
 #################### MLSL ####################
 
 
