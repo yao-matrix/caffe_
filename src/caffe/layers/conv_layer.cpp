@@ -53,18 +53,27 @@ namespace caffe {
 
 template <typename Dtype>
 int ConvolutionLayer<Dtype>::checkAVX() {
-  //  const int* out_dims = this->output_shape_.data();
-  //  const int* ker_dims = this->kernel_shape_.cpu_data();
+  const int* ker_dims = this->kernel_shape_.cpu_data();
+  const int* dil_dims = this->dilation_.cpu_data();
   int ic = this->channels_;
   int oc = this->num_output_;
-
-  // int threshold = oc * ic * ker_dims[0] * ker_dims[1] * ker_dims[2];
-
-  bool ok = true && (ic % 8 == 0 || ic == 3) && (oc % 8 == 0);
-  if (!ok) {
-    return 0;
-  } else {
-    int type = ((ic % 16 == 0 || ic == 3) && (oc % 16 == 0)) ? 1 : 2;
+  long threshold = (long)1e14;
+  long size = (long)oc * ic * ker_dims[0] * ker_dims[1] * ker_dims[2] 
+    * ic * ker_dims[0] * ker_dims[1] * ker_dims[2]
+    * src_dims[2] * src_dims[3] * src_dims[4];
+  
+  bool no_dilation = (dil_dims[0] == 1) && 
+    (dil_dims[1] == 1) && (dil_dims[2] == 1);
+  bool no_group = this->group_ == 1;
+  bool with_bias = this->bias_term_;
+ 
+  bool ok = true && no_dilation && no_group && 
+    with_bias && size >= threshold &&
+    (ic % 8 == 0 || ic == 3) && (oc % 8 == 0);
+  if (!ok) return 0;
+  else {
+    int type = ((ic % 16 == 0 || ic == 3) && 
+    (oc % 16 == 0))? 1 : 2; 
     return type;
   }
 }
@@ -72,12 +81,17 @@ int ConvolutionLayer<Dtype>::checkAVX() {
 template <typename Dtype>
 void ConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   BaseConvolutionLayer<Dtype>::LayerSetUp(bottom,top);
+  const int* bottom_dims = bottom[0]->shape().data();
+  for (int i = 0; i < this->num_spatial_axes_ + 2; ++i) {
+    src_dims.push_back(bottom_dims[i]);
+  }
   if (this->num_spatial_axes_ == 3) {
     useAVX_t = checkAVX();
     LOG(ERROR) << "Setup for AVX engine: " << useAVX_t;
   } else {
     useAVX_t = 0;
   }
+  src_dims.clear();
 }
 
 template <typename Dtype>
@@ -425,6 +439,7 @@ void ConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
 
   if (reinitialize == true) {
     BaseConvolutionLayer<Dtype>::Reshape(bottom, top);
+    src_dims.clear();
     for (int i = 0; i < this->num_spatial_axes_ + 2; ++i) {
       src_dims.push_back(bottom_dims[i]);
     }
@@ -616,11 +631,9 @@ void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
 
   if (this->num_spatial_axes_ == 3 && useAVX_t != 0) {
-    LOG(ERROR) << "optimized";
     Backward_data_3D(bottom,top);
     Backward_weights_3D(bottom,top);
   } else {
-    LOG(ERROR) << "gemm";
     const Dtype* weight = this->blobs_[0]->cpu_data();
     Dtype* weight_diff = this->blobs_[0]->mutable_cpu_diff();
     for (int i = 0; i < top.size(); ++i) {
