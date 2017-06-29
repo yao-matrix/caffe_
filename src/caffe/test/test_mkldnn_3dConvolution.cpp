@@ -1,0 +1,448 @@
+#include "gtest/gtest.h"
+
+#include <iostream>
+#include <numeric>
+#include "mkldnn.hpp"
+#include <time.h>
+#include <sys/time.h>
+#include<stdlib.h>
+#include "caffe/blob.hpp"
+#include "caffe/common.hpp"
+#include "caffe/filler.hpp"
+#include "caffe/layers/conv_layer.hpp"
+
+#ifdef USE_CUDNN
+#include "caffe/layers/cudnn_conv_layer.hpp"
+#endif
+
+#include "caffe/test/test_caffe_main.hpp"
+#include "caffe/test/test_gradient_check_util.hpp"
+
+
+using namespace mkldnn;
+
+// initialize 3D conv parameters, these are used as global variables
+int dims[] = {2, 32, 64, 128, 128};        // input dims
+int out_dims[] = {2, 32, 64, 128, 128};    // output dims
+int kernel_dims[] = {32, 32, 5, 5, 5};     // kernel_dims
+int strides[] = {1, 1, 1};                 // strides
+int paddings[] = {2, 2, 2};                // paddings
+std::vector<int> blob_dims(dims, dims + 5);
+
+int compute_input_index(int out_index ,int kernel_index, int pad_D, int stride_D){
+  return out_index * stride_D - pad_D + kernel_index;
+}
+
+
+namespace caffe {
+
+template<typename Dtype>
+void init_data(float *output, Blob<Dtype>* data_blob, int bias_divide = 1, bool useAVX512 = true, bool reverse = false){
+  std::vector<int> dims = data_blob->shape();
+  Dtype *input = data_blob->mutable_cpu_data();
+  int cblk = useAVX512? 16 : 8;
+
+  if(bias_divide == 1){  // reorder src data
+    int nblk_size_i = dims[1]*dims[2]*dims[3]*dims[4];
+    int cblk_size_i = dims[2]*dims[3]*dims[4];
+    int Cblk_size_i = cblk*cblk_size_i;
+    int dblk_size_i = dims[3]*dims[4];
+    int hblk_size_i = dims[4];
+
+    int nblk_size_o = dims[1]*dims[3]*dims[4];
+    int Cblk_size_o = cblk*dims[3]*dims[4];
+    int dblk_size_o = dims[0]*dims[1]*dims[3]*dims[4];
+    int hblk_size_o = cblk*dims[4];
+
+#pragma omp parallel for collapse(6) schedule(static)
+    for(int d = 0; d < dims[2]; d++){
+      for (int n = 0; n < dims[0]; ++n){
+        for (int C = 0; C < dims[1]/cblk; ++C){
+          for (int h = 0; h < dims[3]; ++h){
+            //int blk_off_i = n*nblk_size_i + C*Cblk_size_i + d*dblk_size_i + h*hblk_size_i;
+            //int blk_off_o = d*dblk_size_o + n*nblk_size_o + C*Cblk_size_o + h*hblk_size_o;
+            for (int w = 0; w < dims[4]; ++w) {
+              for (int c = 0; c < cblk; ++c) {
+                //int off_i = blk_off_i + c*cblk_size_i + w;
+                //int off_o = blk_off_o + w*cblk + c;
+                int off_i = n*nblk_size_i + C*Cblk_size_i + d*dblk_size_i + h*hblk_size_i + c*cblk_size_i + w; 
+                int off_o = d*dblk_size_o + n*nblk_size_o + C*Cblk_size_o + h*hblk_size_o + w*cblk + c;
+                if (!reverse) output[off_o] = (float)input[off_i];
+                else input[off_i] = (float)output[off_o];
+              }
+            }
+          }
+        }
+      }
+    }
+  } else if(bias_divide == 0){  // reorder weight
+    int oblk_size_i = dims[1]*dims[2]*dims[3]*dims[4];
+    int Oblk_size_i = cblk*oblk_size_i;
+    int iblk_size_i = dims[2]*dims[3]*dims[4];
+    int Iblk_size_i = cblk*iblk_size_i;
+    int hblk_size_i = dims[4];
+    int dblk_size_i = dims[3]*dims[4];
+
+    int wblk_size_o = cblk*cblk;
+    int hblk_size_o = dims[4]*wblk_size_o;
+    int Iblk_size_o = dims[3] * hblk_size_o;
+    int Oblk_size_o = dims[1]/cblk *  Iblk_size_o; //dims[1]*dims[3]*dims[4];
+    int dblk_size_o = dims[0]*dims[1]*dims[3]*dims[4];
+
+#pragma omp parallel for collapse(7) schedule(static)
+    for (int d = 0; d < dims[2]; ++d){
+      for (int O = 0; O < dims[0]/cblk; ++O){
+        for (int I = 0; I < dims[1]/cblk; ++I){
+          for (int h = 0; h < dims[3]; ++h){
+            for (int w  = 0; w < dims[4]; ++w){
+              //int blk_off_i = O*Oblk_size_i + I*Iblk_size_i + d*dblk_size_i + h*hblk_size_i;
+              //int blk_off_o = d*dblk_size_o + O*Oblk_size_o + I*Iblk_size_o + h*hblk_size_o;
+              for (int ic = 0; ic < cblk; ++ic) {
+                for (int oc = 0; oc < cblk; ++oc) {
+                  //int off_i = blk_off_i + ic*iblk_size_i + oc*oblk_size_i + w;
+                  //int off_o = blk_off_o + w*wblk_size_o + ic*cblk + oc;
+                  int off_i = O*Oblk_size_i + I*Iblk_size_i + d*dblk_size_i + h*hblk_size_i + ic*iblk_size_i + oc*oblk_size_i + w;
+                  int off_o = d*dblk_size_o + O*Oblk_size_o + I*Iblk_size_o + h*hblk_size_o + w*wblk_size_o + ic*cblk + oc;
+                  if (!reverse) output[off_o] = (float)input[off_i];
+                  else input[off_i] = (float)output[off_o];
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } else if (bias_divide >1){  // set bias data
+    for(int oc = 0; oc < dims[0]; oc++){
+            output[oc] = (float)input[oc] / (float)bias_divide;
+    }
+  }
+  else {
+    std::cout << "Not implemented" << std::endl;
+  }
+
+}
+
+template void init_data(float *output, Blob<float>* data_blob, int bias_divide, bool useAVX512, bool reverse);
+template void init_data(float *output, Blob<double>* data_blob, int bias_divide, bool useAVX512, bool reverse);
+
+template<typename Dtype>
+void output_data(std::vector<float*> input, Blob<Dtype>* top_blob, bool useAVX512 = true){
+  std::vector<int> dims = top_blob->shape();
+  Dtype *output = top_blob->mutable_cpu_data();
+  int cblk = useAVX512? 16 : 8;
+
+  int nblk_size_o = dims[1]*dims[2]*dims[3]*dims[4];
+  int cblk_size_o = dims[2]*dims[3]*dims[4];
+  int Cblk_size_o = cblk * cblk_size_o;
+  int dblk_size_o = dims[3]*dims[4];
+  int hblk_size_o = dims[4];
+
+  int nblk_size_i = dims[1]*dims[3]*dims[4];
+  int Cblk_size_i = cblk*dims[3]*dims[4];
+  //int dblk_size_i = dims[0]*dims[1]*dims[3]*dims[4];
+  int hblk_size_i = cblk*dims[4];
+
+  #pragma omp parallel for collapse(4) schedule(static)
+  for(int d = 0; d < dims[2]; d++){
+    for (int n = 0; n < dims[0]; ++n){
+      for (int C = 0; C < dims[1]/cblk; ++C){
+        for (int h = 0; h < dims[3]; ++h){
+          int blk_off_i = n*nblk_size_i + C*Cblk_size_i + h*hblk_size_i;
+          int blk_off_o = d*dblk_size_o + n*nblk_size_o + C*Cblk_size_o + h*hblk_size_o;
+          for (int w = 0; w < dims[4]; ++w) {
+            for (int c = 0; c < cblk; ++c) {
+              int off_i = blk_off_i + w*cblk + c;
+              int off_o = blk_off_o + c*cblk_size_o + w;
+                output[off_o] = (Dtype)input[d][off_i];
+            }
+          }
+        }
+      }
+    }
+  }
+}
+template void output_data(std::vector<float*> input, Blob<float>* top_blob, bool useAVX512);
+template void output_data(std::vector<float*> input, Blob<double>* top_blob, bool useAVX512);
+
+
+
+
+
+template<typename Dtype>
+void test_net(Blob<Dtype>* bottom_blob, Blob<Dtype>* weights_blob, Blob<Dtype>* bias_blob, Blob<Dtype>* top_blob){
+  // get engine
+  auto cpu_engine = engine(engine::cpu, 0);
+
+  // init src, weights, bias data
+  //float *data_src;
+  std::vector<float> data_src(bottom_blob->count());
+  //float *data_weights;
+  std::vector<float> data_weights(weights_blob->count());
+  //float *data_bias;
+  std::vector<float> data_bias(bias_blob->count());
+  //float *data_dst;
+  std::vector<float> data_src_zero(dims[0] * dims[1] * dims[3] * dims[4], 0.);
+
+  // initialize dat
+  timeval gem_start, gem_end; // for timing test
+  gettimeofday(&gem_start, NULL);   // for timing test
+  
+  init_data(data_src.data(), bottom_blob, 1);
+  init_data(data_weights.data(), weights_blob, 0);
+  init_data(data_bias.data(), bias_blob, kernel_dims[2]);
+
+  gettimeofday(&gem_end,NULL);
+  int gem_timeuse1 = 1000000 *  ( gem_end.tv_sec - gem_start.tv_sec ) + gem_end.tv_usec - gem_start.tv_usec;
+  printf("init elapsed  time: %d us\n", gem_timeuse1);
+
+
+  // set 2d memory dims
+  memory::dims conv_src_nchw = {dims[0], dims[1], dims[3], dims[4]}; //src shape
+  memory::dims conv_weights_oihw = {out_dims[1], dims[1], kernel_dims[3], kernel_dims[4]}; // weights shape
+  memory::dims conv_bias_x = {out_dims[1]};  // bias shape
+  memory::dims conv_dst_nchw = {out_dims[0], out_dims[1], out_dims[3], out_dims[4]};   // dst shape
+
+  // set 2d convolution parameters
+  memory::dims conv_strides = {strides[1], strides[2]};  // strides shape
+  memory::dims conv_padding = {paddings[1], paddings[2]};   // padding shape
+
+  // create convolution usr memory desc
+  auto conv_usr_src_md = memory::desc({conv_src_nchw}, memory::data_type::f32, memory::format::nChw16c);
+  auto conv_usr_weights_md = memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::OIhw16i16o);
+  auto conv_usr_bias_md = memory::desc({conv_bias_x}, memory::data_type::f32, memory::format::x);
+
+  // create convolution private memory desc
+  auto conv_src_md = memory::desc({conv_src_nchw}, memory::data_type::f32, memory::format::any);
+  auto conv_dst_md = memory::desc({conv_dst_nchw}, memory::data_type::f32,memory::format::any);
+  auto conv_bias_md = memory::desc({conv_bias_x}, memory::data_type::f32, memory::format::x);
+  auto conv_weights_md = memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::any);
+
+  // create conv desc
+  auto conv_desc = convolution_forward::desc(prop_kind::forward,
+         convolution_direct, conv_src_md, conv_weights_md, conv_bias_md,
+         conv_dst_md, conv_strides, conv_padding, conv_padding, padding_kind::zero);
+
+  // create conv primitive desc
+  auto conv_pd = convolution_forward::primitive_desc(conv_desc, cpu_engine);
+
+  // create usr memory vector
+  std::vector<memory> conv_usr_src_memory; //[out_dims[2]][kernel_dims[2]];
+  std::vector<memory> conv_usr_weights_memory; //[out_dims[2]][kernel_dims[2]];
+  std::vector<memory> conv_usr_bias_memory; //[out_dims[2]][kernel_dims[2]];
+
+  // create conv memory vector
+  std::vector<memory> conv_dst_memory; //[out_dims[2]][kernel_dims[2]];
+  std::vector<memory> conv_src_memory; //[out_dims[2]][kernel_dims[2]];
+  std::vector<memory> conv_weights_memory; //[out_dims[2]][kernel_dims[2]];
+
+  std::vector<std::vector<primitive> > nets;
+
+  // create a set of 2d conv layers
+  int data_slice_num = dims[0] * dims[1] * dims[3] * dims[4];
+  int weights_slice_num = kernel_dims[0] * kernel_dims[1] * kernel_dims[3] * kernel_dims[4];
+  for (int od = 0; od < out_dims[2]; od++){  //od means d of output feature map
+    for (int kd = 0; kd < kernel_dims[2]; kd++){   // kd means d of kernel
+      int input_index = compute_input_index(od, kd, paddings[0], strides[0]);
+       
+      // set conv_usr_src_memory
+      auto conv_usr_src_memory_tmp = memory({conv_usr_src_md, cpu_engine});
+
+      if(input_index < 0 || input_index >= dims[2]){
+        conv_usr_src_memory_tmp = memory({conv_usr_src_md, cpu_engine}, data_src_zero.data());
+      } else {
+        conv_usr_src_memory_tmp = memory({conv_usr_src_md, cpu_engine}, data_src.data() + input_index * data_slice_num);
+      }
+
+      conv_usr_src_memory.push_back(conv_usr_src_memory_tmp);
+
+      // set conv_usr_weights_memory
+      auto conv_usr_weights_memory_tmp = memory({conv_usr_weights_md, cpu_engine},data_weights.data() + kd * weights_slice_num);
+      conv_usr_weights_memory.push_back(conv_usr_weights_memory_tmp);
+
+      // set conv_usr_bias_memory
+      auto conv_usr_bias_memory_tmp = memory({conv_usr_bias_md, cpu_engine}, data_bias.data());
+      conv_usr_bias_memory.push_back(conv_usr_bias_memory_tmp);
+
+      // create a net to include reorder and conv_fwd
+      std::vector<primitive> net;
+
+      // set conv_src_memory
+      auto conv_src_memory_tmp = conv_usr_src_memory_tmp;
+      if(memory::primitive_desc(conv_pd.src_primitive_desc()) != 
+             conv_usr_src_memory_tmp.get_primitive_desc()) {
+        printf("reordering src\n");
+        conv_src_memory_tmp = memory(conv_pd.src_primitive_desc());
+        auto conv_src_reorder = reorder(conv_usr_src_memory_tmp, conv_src_memory_tmp);
+        net.push_back(conv_src_reorder);
+      }
+
+      // set conv_weights_memory
+      auto conv_weights_memory_tmp = conv_usr_weights_memory_tmp;
+      if (memory::primitive_desc(conv_pd.weights_primitive_desc()) != 
+             conv_usr_weights_memory_tmp.get_primitive_desc()) {
+        printf("reordering weights\n");
+        conv_weights_memory_tmp = memory(conv_pd.weights_primitive_desc());
+        auto conv_weights_reorder = reorder(conv_usr_weights_memory_tmp, conv_weights_memory_tmp);
+        net.push_back(conv_weights_reorder);
+      }
+
+      // set conv_dst_memory
+      auto conv_dst_memory_tmp = memory(conv_pd.dst_primitive_desc());
+      conv_dst_memory.push_back(conv_dst_memory_tmp);
+
+      // create convolution forward 
+      auto conv_fwd = convolution_forward(
+                        conv_pd, conv_src_memory_tmp, conv_weights_memory_tmp,
+                        conv_usr_bias_memory_tmp, conv_dst_memory[od * kernel_dims[2] + kd]);
+
+      net.push_back(conv_fwd);
+
+      // add this convolution_forward to the convolution series.
+      nets.push_back(net);
+    }
+  }
+
+  // create elementwise sumlayer
+  std::vector<memory::primitive_desc> srcs_pd;
+  //std::vector<memory> srcs;
+  std::vector<double> scale;
+  auto sum_memory_pd = conv_pd.dst_primitive_desc();
+
+  for(int i = 0; i < kernel_dims[2]; i++){
+    srcs_pd.push_back(sum_memory_pd);   // create the src primitive descriptor series.
+    scale.push_back(1.0);               // create the scale vector
+  }
+  
+  const auto sum_dst_memroy_desc = sum_memory_pd.desc();     // create the dst meomry descriptor
+  auto sum_pd = sum::primitive_desc(sum_dst_memroy_desc, scale, srcs_pd);  // create sum primitive descriptor
+
+  timeval start, end;    // for timing test
+  gettimeofday(&start,NULL);  // for timing test
+
+  std::vector<float>  sum_out(top_blob->count(), 0.);
+  for (int i = 0; i < out_dims[2]; i++){
+    auto dst = memory(sum_pd.dst_primitive_desc(), sum_out.data() + i * dims[0] * dims[1] * dims[3] * dims[4]);
+    std::vector<primitive::at> inputs;
+
+    for (int j = 0; j < kernel_dims[2]; j++) {
+      auto s = stream(stream::kind::eager);
+      s.submit(nets[i * kernel_dims[2] + j]).wait();
+      inputs.push_back(conv_dst_memory[i * kernel_dims[2] + j]); // get the out put of conv
+    }
+
+    auto sum_inputs = sum(sum_pd, inputs, dst); // sum over j
+    std::vector<primitive> pipeline;
+    pipeline.push_back(sum_inputs);
+    stream(stream::kind::eager).submit(pipeline).wait();
+  }
+
+  gettimeofday(&end,NULL);
+  int timeuse1 = 1000000 *  ( end.tv_sec - start.tv_sec ) + end.tv_usec - start.tv_usec;
+  printf("elapsed  time: %d us\n", timeuse1);
+
+  
+  timeval out_start, out_end;    // for timing test
+  gettimeofday(&out_start,NULL);  // for timing test
+
+  init_data(sum_out.data(), top_blob, 1, true, true);
+  gettimeofday(&out_end,NULL);
+
+  int out_timeuse1 = 1000000 *  ( out_end.tv_sec - out_start.tv_sec ) + out_end.tv_usec - out_start.tv_usec;
+  printf("out put elapsed  time: %d us\n", out_timeuse1);
+
+}
+
+template void test_net(Blob<float>* bottom_blob, Blob<float>* weights_blob, Blob<float>* bias_blob, Blob<float>* top_blob);
+template void test_net(Blob<double>* bottom_blob, Blob<double>* weights_blob, Blob<double>* bias_blob, Blob<double>* top_blob);
+
+
+template<typename TypeParam>
+class MKLConvolution3dLayerTest : public MultiDeviceTest<TypeParam> {
+  typedef typename TypeParam::Dtype Dtype;
+
+  protected:
+    MKLConvolution3dLayerTest()
+      : blob_bottom_(new Blob<Dtype>(blob_dims)),
+        blob_top_(new Blob<Dtype>()) {}
+    virtual void SetUp() {
+      // fill the values
+      FillerParameter filler_param;
+      filler_param.set_value(1.);
+      GaussianFiller<Dtype> filler(filler_param);
+      filler.Fill(this->blob_bottom_);
+      this->blob_bottom_vec_.push_back(this->blob_bottom_);
+      this->blob_top_vec_.push_back(this->blob_top_);
+    }
+
+    virtual ~MKLConvolution3dLayerTest(){
+      delete blob_bottom_;
+      delete blob_top_;      
+    }
+
+    virtual Blob<Dtype>* MakeReferenceTop(Blob<Dtype>* top) {
+      this->ref_blob_top_.reset(new Blob<Dtype>());
+      this->ref_blob_top_->ReshapeLike(*top);
+      return this->ref_blob_top_.get();
+    }
+
+    Blob<Dtype>* const blob_bottom_;
+    Blob<Dtype>* const blob_top_;
+    shared_ptr<Blob<Dtype> > ref_blob_top_;
+    vector<Blob<Dtype>*> blob_bottom_vec_;
+    vector<Blob<Dtype>*> blob_top_vec_;
+};
+
+TYPED_TEST_CASE(MKLConvolution3dLayerTest, TestDtypesAndDevices);
+
+TYPED_TEST(MKLConvolution3dLayerTest, TestSimpleConvolution) {
+  typedef typename TypeParam::Dtype Dtype;
+
+
+  LayerParameter layer_param;
+  ConvolutionParameter* convolution_param =
+      layer_param.mutable_convolution_param();
+  convolution_param->add_kernel_size(kernel_dims[2]);
+  convolution_param->add_stride(strides[0]);
+  convolution_param->add_pad(paddings[0]);
+  convolution_param->set_num_output(out_dims[1]);
+  convolution_param->mutable_weight_filler()->set_type("gaussian");
+  //nvolution_param->mutable_weight_filler()->set_value(0.1);
+  convolution_param->mutable_bias_filler()->set_type("constant");
+  convolution_param->mutable_bias_filler()->set_value(0.1);
+
+  shared_ptr<Layer<Dtype> > layer(
+      new ConvolutionLayer<Dtype>(layer_param));
+  layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
+
+  std::vector<int> out_blob_shape(out_dims, out_dims+5);
+  Blob<Dtype>* top_blob(new Blob<Dtype>(out_blob_shape));
+
+  Blob<Dtype>* blob_weight = layer->blobs()[0].get();
+  Blob<Dtype>* blob_bias = layer->blobs()[1].get();
+
+
+  test_net(this->blob_bottom_, blob_weight, blob_bias, top_blob);
+
+
+  timeval gem_start, gem_end; // for timing test
+  gettimeofday(&gem_start, NULL);   // for timing test
+
+  layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+
+  gettimeofday(&gem_end,NULL);
+  int gem_timeuse1 = 1000000 *  ( gem_end.tv_sec - gem_start.tv_sec ) + gem_end.tv_usec - gem_start.tv_usec;
+  printf("gemm elapsed  time: %d us\n", gem_timeuse1);
+
+  // Check against reference convolution.  
+  const Dtype* data_gemm = this->blob_top_->cpu_data();
+  const Dtype* data_mkldnn = top_blob->cpu_data();
+  for (int n = 0; n < top_blob->count(); n++){
+    EXPECT_NEAR(data_gemm[n], data_mkldnn[n], 2e-4);
+  }
+
+}
+
+}
+
+
