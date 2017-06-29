@@ -57,21 +57,21 @@ int ConvolutionLayer<Dtype>::checkAVX() {
   const int* dil_dims = this->dilation_.cpu_data();
   int ic = this->channels_;
   int oc = this->num_output_;
-  long threshold = (long)1e14;
-  long size = (long)oc * ic * ker_dims[0] * ker_dims[1] * ker_dims[2] 
-    * ic * ker_dims[0] * ker_dims[1] * ker_dims[2]
-    * src_dims[2] * src_dims[3] * src_dims[4];
+  long threshold = (long)1e12;
+  long size = (long)oc * ic * ker_dims[0] * ker_dims[1] * ker_dims[2] *
+              ic * ker_dims[0] * ker_dims[1] * ker_dims[2] *
+              src_dims[2] * src_dims[3] * src_dims[4];
   
-  bool no_dilation = (dil_dims[0] == 1) && 
-    (dil_dims[1] == 1) && (dil_dims[2] == 1);
+  bool no_dilation = (dil_dims[0] == 1) &&
+                     (dil_dims[1] == 1) && (dil_dims[2] == 1);
   bool no_group = this->group_ == 1;
-  bool with_bias = this->bias_term_;
  
-  bool ok = true && no_dilation && no_group && 
-    with_bias && size >= threshold &&
-    (ic % 8 == 0 || ic == 3) && (oc % 8 == 0);
-  if (!ok) return 0;
-  else {
+  bool ok = true && no_dilation &&
+            no_group && size >= threshold &&
+            (ic % 8 == 0 || ic == 3) && (oc % 8 == 0);
+  if (!ok) {
+    return 0;
+  } else {
     int type = ((ic % 16 == 0 || ic == 3) && 
     (oc % 16 == 0))? 1 : 2; 
     return type;
@@ -87,7 +87,7 @@ void ConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom, con
   }
   if (this->num_spatial_axes_ == 3) {
     useAVX_t = checkAVX();
-    LOG(ERROR) << "Setup for AVX engine: " << useAVX_t;
+    // LOG(ERROR) << "Setup for AVX engine: " << useAVX_t;
   } else {
     useAVX_t = 0;
   }
@@ -96,122 +96,131 @@ void ConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom, con
 
 template <typename Dtype>
 void ConvolutionLayer<Dtype>::Reorder(Dtype* output, Blob<Dtype>* data_blob,
-                                      int reorder_t, int useAVX_t, bool reverse = false, bool isdiff = false) {
+                                      int reorder_t, int useAVX_t, bool reverse, bool isdiff) {
   std::vector<int> dims = data_blob->shape();
   Dtype *input = isdiff ? data_blob->mutable_cpu_diff() : data_blob->mutable_cpu_data();
   int cblk = (useAVX_t == 1) ? 16 : 8;
   int num_slices = this->kernel_shape_.cpu_data()[0];
 
-  if (reorder_t == 0) { // reorder fwd src
-    int nblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
-    int cblk_size_i = dims[2] * dims[3] * dims[4];
-    int Cblk_size_i = cblk * cblk_size_i;
-    int dblk_size_i = dims[3] * dims[4];
-    int hblk_size_i = dims[4];
+  switch (reorder_t) {
+    case 0:
+      // reorder fwd src
+      int nblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
+      int cblk_size_i = dims[2] * dims[3] * dims[4];
+      int Cblk_size_i = cblk * cblk_size_i;
+      int dblk_size_i = dims[3] * dims[4];
+      int hblk_size_i = dims[4];
 
-    int nblk_size_o = dims[1] * dims[3] * dims[4];
-    int Cblk_size_o = cblk * dims[3] * dims[4];
-    int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
-    int hblk_size_o = cblk * dims[4];
+      int nblk_size_o = dims[1] * dims[3] * dims[4];
+      int Cblk_size_o = cblk * dims[3] * dims[4];
+      int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
+      int hblk_size_o = cblk * dims[4];
 
-    #pragma omp parallel for collapse(6) schedule(static)
-    for (int d = 0; d < dims[2]; d++) {
-      for (int n = 0; n < dims[0]; ++n) {
-        for (int C = 0; C < dims[1]/cblk; ++C) {
-	  for (int h = 0; h < dims[3]; ++h) {
-	    for (int w = 0; w < dims[4]; ++w) {
-              for (int c = 0; c < cblk; ++c) {
-                int off_i = n * nblk_size_i + C * Cblk_size_i + d * dblk_size_i +
-		            h * hblk_size_i + c * cblk_size_i + w;
-                int off_o = d * dblk_size_o + n * nblk_size_o + C * Cblk_size_o +
-                            h * hblk_size_o + w * cblk + c;
-                if (!reverse) {
-                  output[off_o] = input[off_i];
-                } else {
-                  input[off_i] = output[off_o];
+      #pragma omp parallel for collapse(6) schedule(static)
+      for (int d = 0; d < dims[2]; d++) {
+        for (int n = 0; n < dims[0]; ++n) {
+          for (int C = 0; C < dims[1]/cblk; ++C) {
+	    for (int h = 0; h < dims[3]; ++h) {
+	      for (int w = 0; w < dims[4]; ++w) {
+                for (int c = 0; c < cblk; ++c) {
+                  int off_i = n * nblk_size_i + C * Cblk_size_i + d * dblk_size_i +
+		              h * hblk_size_i + c * cblk_size_i + w;
+                  int off_o = d * dblk_size_o + n * nblk_size_o + C * Cblk_size_o +
+                              h * hblk_size_o + w * cblk + c;
+                  if (!reverse) {
+                    output[off_o] = input[off_i];
+                  } else {
+                    input[off_i] = output[off_o];
+                  }
                 }
               }
             }
           }
         }
       }
-    }
-  } else if (reorder_t == 1) {  // reorder fwd weight
-    int oblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
-    int Oblk_size_i = cblk * oblk_size_i;
-    int iblk_size_i = dims[2] * dims[3] * dims[4];
-    int Iblk_size_i = cblk * iblk_size_i;
-    int hblk_size_i = dims[4];
-    int dblk_size_i = dims[3] * dims[4];
+      break;
+    case 1:
+      // reorder fwd weight
+      int oblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
+      int Oblk_size_i = cblk * oblk_size_i;
+      int iblk_size_i = dims[2] * dims[3] * dims[4];
+      int Iblk_size_i = cblk * iblk_size_i;
+      int hblk_size_i = dims[4];
+      int dblk_size_i = dims[3] * dims[4];
 
-    int wblk_size_o = cblk * cblk;
-    int hblk_size_o = dims[4] * wblk_size_o;
-    int Iblk_size_o = dims[3] * hblk_size_o;
-    int Oblk_size_o = dims[1] / cblk * Iblk_size_o;
-    int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
+      int wblk_size_o = cblk * cblk;
+      int hblk_size_o = dims[4] * wblk_size_o;
+      int Iblk_size_o = dims[3] * hblk_size_o;
+      int Oblk_size_o = dims[1] / cblk * Iblk_size_o;
+      int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
 
-    #pragma omp parallel for collapse(7) schedule(static)
-    for (int d = 0; d < dims[2]; ++d){
-      for (int O = 0; O < dims[0] / cblk; ++O) {
-        for (int I = 0; I < dims[1] / cblk; ++I) {
-          for (int h = 0; h < dims[3]; ++h) {
-            for (int w  = 0; w < dims[4]; ++w) {
-              for (int ic = 0; ic < cblk; ++ic) {
-                for (int oc = 0; oc < cblk; ++oc) {
-                  int off_i = O * Oblk_size_i + I * Iblk_size_i + d * dblk_size_i +
-                              h * hblk_size_i + ic * iblk_size_i + oc * oblk_size_i + w;
-                  int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
-                              h * hblk_size_o + w * wblk_size_o + ic * cblk + oc;
-                  if (!reverse) {
-                    output[off_o] = input[off_i];
-                  } else {
-                    input[off_i] = output[off_o];
-                  }
-		}
-              }
-            }
-          }
-        }
-      }
-    }
-  } else if (reorder_t == 2) {  // reorder fwd bias
-    for (int oc = 0; oc < dims[0]; oc++) {
-      if (!reverse) {
-        output[oc] = input[oc] / num_slices;
-      } else {
-        input[oc] = output[oc];
-      }
-    }
-  } else if (reorder_t == 3) {  // reorder bwd weight
-    int oblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
-    int Oblk_size_i = cblk * oblk_size_i;
-    int iblk_size_i = dims[2] * dims[3] * dims[4];
-    int Iblk_size_i = cblk * iblk_size_i;
-    int hblk_size_i = dims[4];
-    int dblk_size_i = dims[3] * dims[4];
-
-    int wblk_size_o = cblk * cblk;
-    int hblk_size_o = dims[4] * wblk_size_o;
-    int Iblk_size_o = dims[3] * hblk_size_o;
-    int Oblk_size_o = dims[1] / cblk * Iblk_size_o; 
-    int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
-
-    #pragma omp parallel for collapse(7) schedule(static)
-    for (int d = 0; d < dims[2]; ++d) {
-      for (int O = 0; O < dims[0] / cblk; ++O) {
-        for (int I = 0; I < dims[1] / cblk; ++I) {
-          for (int h = 0; h < dims[3]; ++h) {
-            for (int w  = 0; w < dims[4]; ++w) {
-              for (int oc = 0; oc < cblk; ++oc) {
+      #pragma omp parallel for collapse(7) schedule(static)
+      for (int d = 0; d < dims[2]; ++d){
+        for (int O = 0; O < dims[0] / cblk; ++O) {
+          for (int I = 0; I < dims[1] / cblk; ++I) {
+            for (int h = 0; h < dims[3]; ++h) {
+              for (int w  = 0; w < dims[4]; ++w) {
                 for (int ic = 0; ic < cblk; ++ic) {
-                  int off_i = O * Oblk_size_i + I * Iblk_size_i + d * dblk_size_i +
-                              h * hblk_size_i + ic * iblk_size_i + oc * oblk_size_i + w;
-                  int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
-                              h * hblk_size_o + w * wblk_size_o + oc * cblk + ic;
-                  if (!reverse) {
-                    output[off_o] = input[off_i];
-                  } else {
-                    input[off_i] = output[off_o];
+                  for (int oc = 0; oc < cblk; ++oc) {
+                    int off_i = O * Oblk_size_i + I * Iblk_size_i + d * dblk_size_i +
+                                h * hblk_size_i + ic * iblk_size_i + oc * oblk_size_i + w;
+                    int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
+                                h * hblk_size_o + w * wblk_size_o + ic * cblk + oc;
+                    if (!reverse) {
+                      output[off_o] = input[off_i];
+                    } else {
+                      input[off_i] = output[off_o];
+                    }
+		  }
+                }
+              }
+            }
+          }
+        }
+      }
+      break;
+    case 2:
+      // reorder fwd bias
+      for (int oc = 0; oc < dims[0]; oc++) {
+        if (!reverse) {
+          output[oc] = input[oc] / (Dtype)num_slices;
+        } else {
+          input[oc] = output[oc];
+        }
+      }
+      break;
+    case 3:
+      // reorder bwd weight
+      int oblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
+      int Oblk_size_i = cblk * oblk_size_i;
+      int iblk_size_i = dims[2] * dims[3] * dims[4];
+      int Iblk_size_i = cblk * iblk_size_i;
+      int hblk_size_i = dims[4];
+      int dblk_size_i = dims[3] * dims[4];
+
+      int wblk_size_o = cblk * cblk;
+      int hblk_size_o = dims[4] * wblk_size_o;
+      int Iblk_size_o = dims[3] * hblk_size_o;
+      int Oblk_size_o = dims[1] / cblk * Iblk_size_o;
+      int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
+
+      #pragma omp parallel for collapse(7) schedule(static)
+      for (int d = 0; d < dims[2]; ++d) {
+        for (int O = 0; O < dims[0] / cblk; ++O) {
+          for (int I = 0; I < dims[1] / cblk; ++I) {
+            for (int h = 0; h < dims[3]; ++h) {
+              for (int w  = 0; w < dims[4]; ++w) {
+                for (int oc = 0; oc < cblk; ++oc) {
+                  for (int ic = 0; ic < cblk; ++ic) {
+                    int off_i = O * Oblk_size_i + I * Iblk_size_i + d * dblk_size_i +
+                                h * hblk_size_i + ic * iblk_size_i + oc * oblk_size_i + w;
+                    int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
+                                h * hblk_size_o + w * wblk_size_o + oc * cblk + ic;
+                    if (!reverse) {
+                      output[off_o] = input[off_i];
+                    } else {
+                      input[off_i] = output[off_o];
+                    }
                   }
                 }
               }
@@ -219,9 +228,10 @@ void ConvolutionLayer<Dtype>::Reorder(Dtype* output, Blob<Dtype>* data_blob,
           }
         }
       }
-    }
-  } else {
-    LOG(ERROR) << "undefined reorder type."; 
+      break;
+    default:
+      LOG(ERROR) << "undefined reorder type";
+      break;
   }
 }
 
@@ -244,16 +254,24 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   conv_srcs_diff.clear();
   conv_dsts_diff.clear();
 
-  conv_srcs.resize(bottom.size()*bottom[0]->count());
-  conv_dsts.resize(bottom.size()*bottom[0]->count());
+  conv_srcs.resize(bottom.size() * bottom[0]->count());
+  conv_dsts.resize(top.size() * top[0]->count());
   conv_weight.resize(this->blobs_[0]->count());
-  conv_bias.resize(this->blobs_[1]->count());
+  if (this->bias_term_) {
+    conv_bias.resize(this->blobs_[1]->count());
+  } else {
+    conv_bias.resize(this->num_output_, 0.);
+  }
 
   conv_weight_bwd.resize(this->blobs_[0]->count());
   conv_weight_diff.resize(this->blobs_[0]->count());
-  conv_bias_diff.resize(this->blobs_[1]->count());
-  conv_srcs_diff.resize(bottom.size()*bottom[0]->count());
-  conv_dsts_diff.resize(bottom.size()*bottom[0]->count());
+  if (this->bias_term_) {
+    conv_bias_diff.resize(this->blobs_[1]->count());
+  } else {
+    conv_bias_diff.resize(this->num_output_, 0.);
+  }
+  conv_srcs_diff.resize(bottom.size() * bottom[0]->count());
+  conv_dsts_diff.resize(top.size() * top[0]->count());
 
   // 2D memory reshape
   const int* out_dims = this->output_shape_.data();
@@ -298,7 +316,7 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   // creat slices sum descriptor
   auto sum_src_pd = conv_fwd_pd->dst_primitive_desc();
   auto sum_dst_md = sum_src_pd.desc();
-  vector<memory::primitive_desc> sum_srcs_pd(ker_dims[0],sum_src_pd);
+  vector<memory::primitive_desc> sum_srcs_pd(ker_dims[0], sum_src_pd);
   vector<double> sum_scale(ker_dims[0], 1.0);
   auto sum_fwd_pd = new sum::primitive_desc(sum_dst_md, sum_scale, sum_srcs_pd);
 
@@ -470,7 +488,12 @@ template <typename Dtype>
 void ConvolutionLayer<Dtype>::Forward_3D(const vector<Blob<Dtype>*>& bottom,
   const vector<Blob<Dtype>*>& top) {
   Blob<Dtype>* weight = this->blobs_[0].get();
-  Blob<Dtype>* bias = this->blobs_[1].get();
+  Blob<Dtype>* bias;
+  if (this->bias_term_) {
+    bias = this->blobs_[1].get();
+  } else {
+    bias = NULL;
+  }
 
   Reorder(conv_weight.data(), weight, 1, useAVX_t, false);
   Reorder(conv_bias.data(), bias, 2, useAVX_t, false);
@@ -503,7 +526,12 @@ template <typename Dtype>
 void ConvolutionLayer<Dtype>::Backward_weights_3D(const vector<Blob<Dtype>*>& bottom,
   const vector<Blob<Dtype>*>& top) {
   Blob<Dtype>* weight = this->blobs_[0].get();
-  Blob<Dtype>* bias = this->blobs_[1].get();
+  Blob<Dtype>* bias;
+  if (this->bias_term_) {
+    bias = this->blobs_[1].get();
+  } else {
+    bias = NULL;
+  }
 
   if (!srcsync) {
     for (int i = 0; i < bottom.size(); ++i) {
@@ -512,7 +540,9 @@ void ConvolutionLayer<Dtype>::Backward_weights_3D(const vector<Blob<Dtype>*>& bo
   }
   stream(stream::kind::eager).submit(pipeline_bwd_wgts).wait();
   Reorder(conv_weight_diff.data(), weight, 1, useAVX_t, true, true);
-  Reorder(conv_bias_diff.data(), bias, 2, useAVX_t, true, true);
+  if (this->bias_term_) {
+    Reorder(conv_bias_diff.data(), bias, 2, useAVX_t, true, true);
+  }
 }
 
 template <typename Dtype>
@@ -529,7 +559,7 @@ void ConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       const Dtype* bottom_data = bottom[i]->cpu_data();
       Dtype* top_data = top[i]->mutable_cpu_data();
   #ifdef _OPENMP
-      #pragma omp parallel if((this->num_of_threads_ > 1) && (this->num_spatial_axes_ == 2)) num_threads(this->num_of_threads_)
+      #pragma omp parallel if(this->num_of_threads_ > 1) num_threads(this->num_of_threads_)
   #endif
       {
   #ifdef _OPENMP

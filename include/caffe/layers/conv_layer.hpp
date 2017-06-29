@@ -169,7 +169,7 @@ class ConvolutionLayer : public BaseConvolutionLayer<Dtype> {
   int useAVX_t;
   int checkAVX();
   bool srcsync;
-  void Reorder(Dtype* output, Blob<Dtype>* data_blob, int reorder_t, int useAVX_t, bool reverse, bool isdiff);
+  void Reorder(Dtype* output, Blob<Dtype>* data_blob, int reorder_t, int useAVX_t, bool reverse = false, bool isdiff = false);
   void ReshapeForMKLdnn(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top);
   void Forward_3D(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top);
   void Backward_data_3D(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top);
