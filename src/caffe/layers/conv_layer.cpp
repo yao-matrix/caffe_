@@ -58,10 +58,12 @@ int ConvolutionLayer<Dtype>::checkAVX() {
   const int* str_dims = this->stride_.cpu_data();
   int ic = this->channels_;
   int oc = this->num_output_;
+  /*
   long threshold = (long)1e12;
   long size = (long)oc * ic * ker_dims[0] * ker_dims[1] * ker_dims[2] *
               ic * ker_dims[0] * ker_dims[1] * ker_dims[2] *
               src_dims[2] * src_dims[3] * src_dims[4];
+  */
 
   bool no_stride = (str_dims[0] == 1) &&
                    (str_dims[1] == 1) && (str_dims[2] == 1);
@@ -70,8 +72,7 @@ int ConvolutionLayer<Dtype>::checkAVX() {
   bool no_group = this->group_ == 1;
 
   bool ok = true && no_dilation && no_stride &&
-            no_group && size >= threshold &&
-            (ic % 8 == 0 || ic == 3) && (oc % 8 == 0);
+            no_group && (ic % 8 == 0 || ic == 3) && (oc % 8 == 0);
   if (!ok) {
     return 0;
   } else {
