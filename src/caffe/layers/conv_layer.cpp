@@ -383,7 +383,7 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
                                  conv_weights_mem.back(), conv_bias_mem.back(), conv_dst_mem.back()) :
              convolution_forward(*conv_fwd_pd, conv_src_mem.back(),
                                  conv_weights_mem.back(), conv_dst_mem.back());
-	conv_fwds.push_back(conv_fwd);
+        conv_fwds.push_back(conv_fwd);
         sum_inputs.push_back(conv_dst_mem.back());
         pipeline_fwd.push_back(conv_fwds.back());
       }
