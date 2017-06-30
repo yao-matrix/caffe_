@@ -299,11 +299,15 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   memory::dims conv_padding = {pad_dims[1], pad_dims[2]};
 
   // creat memory descriptor
-  auto conv_src_md = memory::desc({conv_src_nchw}, memory::data_type::f32, memory::format::nChw16c);
-  auto conv_weights_md = memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::OIhw16i16o);
+  auto conv_src_md = (useAVX_t == 1) ? memory::desc({conv_src_nchw}, memory::data_type::f32, memory::format::nChw16c) :
+                                       memory::desc({conv_src_nchw}, memory::data_type::f32, memory::format::nChw8c);
+  auto conv_weights_md = (useAVX_t == 1) ? memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::OIhw16i16o) :
+                                           memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::OIhw8i8o);
   auto conv_bias_md = memory::desc({conv_bias_x}, memory::data_type::f32, memory::format::x);
-  auto conv_dst_md = memory::desc({conv_dst_nchw}, memory::data_type::f32,memory::format::nChw16c);
-  auto conv_weights_bwd_md = memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::OIhw16o16i);
+  auto conv_dst_md = (useAVX_t == 1) ? memory::desc({conv_dst_nchw}, memory::data_type::f32,memory::format::nChw16c) :
+                                       memory::desc({conv_dst_nchw}, memory::data_type::f32,memory::format::nChw8c);
+  auto conv_weights_bwd_md = (useAVX_t == 1) ? memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::OIhw16o16i) :
+                                               memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::OIhw8o8i);
 
   // creat convolution descriptor
   auto conv_desc = convolution_forward::desc(prop_kind::forward, convolution_direct,
@@ -336,7 +340,7 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   auto sum_src_bwd_wgts_pd = conv_bwd_wgts_pd->diff_weights_primitive_desc();
   auto sum_dst_bwd_wgts_md = sum_src_bwd_wgts_pd.desc();
   vector<memory::primitive_desc> sum_srcs_bwd_wgts_pd(bottom.size() * out_dims[0], sum_src_bwd_wgts_pd);
-  vector<double> sum_bwd_wgts_scale(bottom.size()*out_dims[0], 1.0);
+  vector<double> sum_bwd_wgts_scale(bottom.size() * out_dims[0], 1.0);
   auto sum_bwd_wgts_pd = new sum::primitive_desc(sum_dst_bwd_wgts_md, sum_bwd_wgts_scale, sum_srcs_bwd_wgts_pd);
 
   auto sum_src_bwd_bias_pd = conv_bwd_wgts_pd->diff_bias_primitive_desc();
@@ -494,7 +498,7 @@ void ConvolutionLayer<Dtype>::compute_output_shape() {
 
 template <typename Dtype>
 void ConvolutionLayer<Dtype>::Forward_3D(const vector<Blob<Dtype>*>& bottom,
-  const vector<Blob<Dtype>*>& top) {
+                                         const vector<Blob<Dtype>*>& top) {
   Blob<Dtype>* weight = this->blobs_[0].get();
   Blob<Dtype>* bias;
   if (this->bias_term_) {
@@ -521,7 +525,7 @@ void ConvolutionLayer<Dtype>::Forward_3D(const vector<Blob<Dtype>*>& bottom,
 
 template <typename Dtype>
 void ConvolutionLayer<Dtype>::Backward_data_3D(const vector<Blob<Dtype>*>& bottom,
-  const vector<Blob<Dtype>*>& top) {
+                                               const vector<Blob<Dtype>*>& top) {
   Blob<Dtype>* weight = this->blobs_[0].get();
 
   Reorder(conv_weight_bwd.data(), weight, 3, useAVX_t, false);
@@ -536,7 +540,7 @@ void ConvolutionLayer<Dtype>::Backward_data_3D(const vector<Blob<Dtype>*>& botto
 
 template <typename Dtype>
 void ConvolutionLayer<Dtype>::Backward_weights_3D(const vector<Blob<Dtype>*>& bottom,
-  const vector<Blob<Dtype>*>& top) {
+                                                  const vector<Blob<Dtype>*>& top) {
   Blob<Dtype>* weight = this->blobs_[0].get();
   Blob<Dtype>* bias;
   if (this->bias_term_) {
@@ -559,7 +563,7 @@ void ConvolutionLayer<Dtype>::Backward_weights_3D(const vector<Blob<Dtype>*>& bo
 
 template <typename Dtype>
 void ConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
-      const vector<Blob<Dtype>*>& top) {
+                                          const vector<Blob<Dtype>*>& top) {
   const Dtype* weight = this->blobs_[0]->cpu_data();
   // If we have more threads available than batches to be prcessed then
   // we are wasting resources (lower batches than 36 on XeonE5)
@@ -670,7 +674,8 @@ void ConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 
 template <typename Dtype>
 void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
-      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
+                                           const vector<bool>& propagate_down,
+                                           const vector<Blob<Dtype>*>& bottom) {
 
   if (this->num_spatial_axes_ == 3 && useAVX_t != 0) {
     Backward_data_3D(bottom,top);
@@ -697,7 +702,6 @@ void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
 
       if (this->param_propagate_down_[0]) {
       #ifdef _OPENMP
-        
         if (this->num_of_threads_ > 1) {
           this->clear_weight_mt();
         }
