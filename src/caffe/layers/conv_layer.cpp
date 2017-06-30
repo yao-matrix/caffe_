@@ -64,7 +64,7 @@ int ConvolutionLayer<Dtype>::checkAVX() {
               src_dims[2] * src_dims[3] * src_dims[4];
 
   bool no_stride = (str_dims[0] == 1) &&
-                   (str_dims[1] == 1) && (str_dims[2] == 1); 
+                   (str_dims[1] == 1) && (str_dims[2] == 1);
   bool no_dilation = (dil_dims[0] == 1) &&
                      (dil_dims[1] == 1) && (dil_dims[2] == 1);
   bool no_group = this->group_ == 1;
@@ -75,7 +75,7 @@ int ConvolutionLayer<Dtype>::checkAVX() {
   if (!ok) {
     return 0;
   } else {
-    int type = ((ic % 16 == 0 || ic == 3) && (oc % 16 == 0)) ? 1 : 2; 
+    int type = ((ic % 16 == 0 || ic == 3) && (oc % 16 == 0)) ? 1 : 2;
     return type;
   }
 }
@@ -362,7 +362,7 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
             memory({conv_src_md, *cpu_engine}, conv_srcs.data() + i * bottom[0]->count() + id * src_slicesize):
             memory({conv_src_md, *cpu_engine}, src_zero_slice.data());
         conv_src_mem.push_back(conv_src_tmp);
-        conv_weights_mem.push_back(memory({conv_weights_md, *cpu_engine}, 
+        conv_weights_mem.push_back(memory({conv_weights_md, *cpu_engine},
                                    conv_weight.data() + kd * wgt_slicesize));
         conv_bias_mem.push_back(memory({conv_bias_md, *cpu_engine}, conv_bias.data()));
         conv_dst_mem.push_back(memory(conv_fwd_pd->dst_primitive_desc()));
@@ -380,8 +380,8 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
 
   // init backward data memory & pipeline
   pipeline_bwd_data.clear();
-  auto dst_idx = [&](int id, int kd) { 
-    return (id+pad_dims[0] - kd) % str_dims[0] ? -1 : (id + pad_dims[0] - kd) / str_dims[0]; 
+  auto dst_idx = [&](int id, int kd) {
+    return (id+pad_dims[0] - kd) % str_dims[0] ? -1 : (id + pad_dims[0] - kd) / str_dims[0];
   };
 
   for (int i = 0; i < bottom.size(); ++i) {
@@ -396,7 +396,7 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
         conv_src_diff_mem.push_back(memory(conv_bwd_data_pd->diff_src_primitive_desc()));
         conv_wgts_bwd_mem.push_back(memory({conv_weights_bwd_md, *cpu_engine},
                                     conv_weight_bwd.data() + kd * wgt_slicesize));
-        conv_dst_diff_mem.push_back(conv_dst_diff_tmp); 
+        conv_dst_diff_mem.push_back(conv_dst_diff_tmp);
         conv_bwds_data.push_back(convolution_backward_data(*conv_bwd_data_pd,
                                                            conv_dst_diff_mem.back(),
                                                            conv_wgts_bwd_mem.back(),
