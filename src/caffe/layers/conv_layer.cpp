@@ -616,9 +616,11 @@ void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
 
   if (this->num_spatial_axes_ == 3 && useAVX_t != 0) {
+    LOG(ERROR) << "optimized";
     Backward_data_3D(bottom,top);
     Backward_weights_3D(bottom,top);
   } else {
+    LOG(ERROR) << "gemm";
     const Dtype* weight = this->blobs_[0]->cpu_data();
     Dtype* weight_diff = this->blobs_[0]->mutable_cpu_diff();
     for (int i = 0; i < top.size(); ++i) {
@@ -639,44 +641,45 @@ void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       // before GEMM ops and results has to be summed up after GEMM ops.
 
       if (this->param_propagate_down_[0]) {
-  #ifdef _OPENMP
-        if (this->num_of_threads_ > 1) {
+      #ifdef _OPENMP
+        
+        if (this->num_of_threads_ > 1 && (this->num_spatial_axes_ == 2)) {
           this->clear_weight_mt();
         }
         #pragma omp parallel if((this->num_of_threads_ > 1) && (this->num_spatial_axes_ == 2)) num_threads(this->num_of_threads_)
-  #endif
+      #endif
         {
-  #ifdef _OPENMP
+      #ifdef _OPENMP
           #pragma omp for
-  #endif
+      #endif
           for (int n = 0; n < this->num_; ++n) {
             // gradient w.r.t. weight. Note that we will accumulate diffs.
             this->weight_cpu_gemm(bottom_data + n * this->bottom_dim_,
                   top_diff + n * this->top_dim_, weight_diff);
           }
 
-  #ifdef _OPENMP
-          if (this->num_of_threads_ > 1) {
+      #ifdef _OPENMP
+          if (this->num_of_threads_ > 1 && (this->num_spatial_axes_ == 2)) {
             this->sum_weight_mt(weight_diff);
           }
-  #endif
+      #endif
         }
       }
 
       if (propagate_down[i]) {
-  #ifdef _OPENMP
+      #ifdef _OPENMP
         #pragma omp parallel if((this->num_of_threads_ > 1) && (this->num_spatial_axes_ == 2)) num_threads(this->num_of_threads_)
         {
           #pragma omp for
-  #endif
+      #endif
           for (int n = 0; n < this->num_; ++n) {
             // gradient w.r.t. bottom data, if necessary.
             this->backward_cpu_gemm(top_diff + n * this->top_dim_, weight,
-                bottom_diff + n * this->bottom_dim_);
+                                    bottom_diff + n * this->bottom_dim_);
           }
-  #ifdef _OPENMP
+      #ifdef _OPENMP
         }
-  #endif
+      #endif
       }
     }
   }
