@@ -55,25 +55,27 @@ template <typename Dtype>
 int ConvolutionLayer<Dtype>::checkAVX() {
   const int* ker_dims = this->kernel_shape_.cpu_data();
   const int* dil_dims = this->dilation_.cpu_data();
+  const int* str_dims = this->stride_.cpu_data();
   int ic = this->channels_;
   int oc = this->num_output_;
   long threshold = (long)1e12;
   long size = (long)oc * ic * ker_dims[0] * ker_dims[1] * ker_dims[2] *
               ic * ker_dims[0] * ker_dims[1] * ker_dims[2] *
               src_dims[2] * src_dims[3] * src_dims[4];
-  
+
+  bool no_stride = (str_dims[0] == 1) &&
+                   (str_dims[1] == 1) && (str_dims[2] == 1); 
   bool no_dilation = (dil_dims[0] == 1) &&
                      (dil_dims[1] == 1) && (dil_dims[2] == 1);
   bool no_group = this->group_ == 1;
- 
-  bool ok = true && no_dilation &&
+
+  bool ok = true && no_dilation && no_stride &&
             no_group && size >= threshold &&
             (ic % 8 == 0 || ic == 3) && (oc % 8 == 0);
   if (!ok) {
     return 0;
   } else {
-    int type = ((ic % 16 == 0 || ic == 3) && 
-    (oc % 16 == 0))? 1 : 2; 
+    int type = ((ic % 16 == 0 || ic == 3) && (oc % 16 == 0)) ? 1 : 2; 
     return type;
   }
 }
@@ -502,7 +504,11 @@ void ConvolutionLayer<Dtype>::Forward_3D(const vector<Blob<Dtype>*>& bottom,
   }
 
   Reorder(conv_weight.data(), weight, 1, useAVX_t, false, false);
-  Reorder(conv_bias.data(), bias, 2, useAVX_t, false, false);
+
+  if (this->bias_term_) {
+    Reorder(conv_bias.data(), bias, 2, useAVX_t, false, false);
+  }
+
   for (int i = 0; i < bottom.size(); ++i) {
     Reorder(conv_srcs.data() + i * bottom[0]->count(), bottom[i], 0, useAVX_t, false, false);
   }
