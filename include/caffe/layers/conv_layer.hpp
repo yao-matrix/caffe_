@@ -129,18 +129,18 @@ class ConvolutionLayer : public BaseConvolutionLayer<Dtype> {
   vector<primitive> pipeline_bwd_wgts;
 
   vector<int> src_dims;
-  vector<float> src_zero_slice;
-  vector<float> dst_zero_slice;
-  vector<float> conv_weight;
-  vector<float> conv_bias;
-  vector<float> conv_srcs;
-  vector<float> conv_dsts;
+  vector<Dtype> src_zero_slice;
+  vector<Dtype> dst_zero_slice;
+  vector<Dtype> conv_weight;
+  vector<Dtype> conv_bias;
+  vector<Dtype> conv_srcs;
+  vector<Dtype> conv_dsts;
 
-  vector<float> conv_weight_bwd;
-  vector<float> conv_weight_diff;
-  vector<float> conv_bias_diff;
-  vector<float> conv_srcs_diff;
-  vector<float> conv_dsts_diff;
+  vector<Dtype> conv_weight_bwd;
+  vector<Dtype> conv_weight_diff;
+  vector<Dtype> conv_bias_diff;
+  vector<Dtype> conv_srcs_diff;
+  vector<Dtype> conv_dsts_diff;
 
   vector<memory> conv_src_mem;
   vector<memory> conv_weights_mem;
@@ -169,7 +169,7 @@ class ConvolutionLayer : public BaseConvolutionLayer<Dtype> {
   int useAVX_t;
   int checkAVX();
   bool srcsync;
-  void Reorder(float* output, Blob<Dtype>* data_blob,int reorder_t,int useAVX_t,bool reverse,bool isdiff);
+  void Reorder(Dtype* output, Blob<Dtype>* data_blob, int reorder_t, int useAVX_t, bool reverse, bool isdiff);
   void ReshapeForMKLdnn(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top);
   void Forward_3D(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top);
   void Backward_data_3D(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top);

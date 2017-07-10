@@ -81,14 +81,14 @@ void ConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom, con
 }
 
 template <typename Dtype>
-void ConvolutionLayer<Dtype>::Reorder(float* output, Blob<Dtype>* data_blob,
+void ConvolutionLayer<Dtype>::Reorder(Dtype* output, Blob<Dtype>* data_blob,
                                       int reorder_t, int useAVX_t, bool reverse = false, bool isdiff = false) {
   std::vector<int> dims = data_blob->shape();
   Dtype *input = isdiff ? data_blob->mutable_cpu_diff() : data_blob->mutable_cpu_data();
   int cblk = (useAVX_t == 1) ? 16 : 8;
   int num_slices = this->kernel_shape_.cpu_data()[0];
 
-  if (reorder_t == 0) {  // reorder fwd src
+  if (reorder_t == 0) { // reorder fwd src
     int nblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
     int cblk_size_i = dims[2] * dims[3] * dims[4];
     int Cblk_size_i = cblk * cblk_size_i;
@@ -99,9 +99,9 @@ void ConvolutionLayer<Dtype>::Reorder(float* output, Blob<Dtype>* data_blob,
     int Cblk_size_o = cblk * dims[3] * dims[4];
     int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
     int hblk_size_o = cblk * dims[4];
-	
+
     #pragma omp parallel for collapse(6) schedule(static)
-    for(int d = 0; d < dims[2]; d++) {
+    for (int d = 0; d < dims[2]; d++) {
       for (int n = 0; n < dims[0]; ++n) {
         for (int C = 0; C < dims[1]/cblk; ++C) {
 	  for (int h = 0; h < dims[3]; ++h) {
@@ -112,9 +112,9 @@ void ConvolutionLayer<Dtype>::Reorder(float* output, Blob<Dtype>* data_blob,
                 int off_o = d * dblk_size_o + n * nblk_size_o + C * Cblk_size_o +
                             h * hblk_size_o + w * cblk + c;
                 if (!reverse) {
-                  output[off_o] = (float)input[off_i];
+                  output[off_o] = input[off_i];
                 } else {
-                  input[off_i] = (float)output[off_o];
+                  input[off_i] = output[off_o];
                 }
               }
             }
@@ -133,7 +133,7 @@ void ConvolutionLayer<Dtype>::Reorder(float* output, Blob<Dtype>* data_blob,
     int wblk_size_o = cblk * cblk;
     int hblk_size_o = dims[4] * wblk_size_o;
     int Iblk_size_o = dims[3] * hblk_size_o;
-    int Oblk_size_o = dims[1] / cblk * Iblk_size_o; 
+    int Oblk_size_o = dims[1] / cblk * Iblk_size_o;
     int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
 
     #pragma omp parallel for collapse(7) schedule(static)
@@ -149,9 +149,9 @@ void ConvolutionLayer<Dtype>::Reorder(float* output, Blob<Dtype>* data_blob,
                   int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
                               h * hblk_size_o + w * wblk_size_o + ic * cblk + oc;
                   if (!reverse) {
-                    output[off_o] = (float)input[off_i];
+                    output[off_o] = input[off_i];
                   } else {
-                    input[off_i] = (float)output[off_o];
+                    input[off_i] = output[off_o];
                   }
 		}
               }
@@ -163,9 +163,9 @@ void ConvolutionLayer<Dtype>::Reorder(float* output, Blob<Dtype>* data_blob,
   } else if (reorder_t == 2) {  // reorder fwd bias
     for (int oc = 0; oc < dims[0]; oc++) {
       if (!reverse) {
-        output[oc] = (float)input[oc] / (float)num_slices;
+        output[oc] = input[oc] / num_slices;
       } else {
-        input[oc] = (float)output[oc];
+        input[oc] = output[oc];
       }
     }
   } else if (reorder_t == 3) {  // reorder bwd weight
@@ -195,9 +195,9 @@ void ConvolutionLayer<Dtype>::Reorder(float* output, Blob<Dtype>* data_blob,
                   int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
                               h * hblk_size_o + w * wblk_size_o + oc * cblk + ic;
                   if (!reverse) {
-                    output[off_o] = (float)input[off_i];
+                    output[off_o] = input[off_i];
                   } else {
-                    input[off_i] = (float)output[off_o];
+                    input[off_i] = output[off_o];
                   }
                 }
               }
@@ -252,11 +252,11 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   src_zero_slice.resize(src_slicesize, 0.);
   dst_zero_slice.resize(dst_slicesize, 0.);
   memory::dims conv_src_nchw = {src_dims[0], src_dims[1], src_dims[3], src_dims[4]};
-  memory::dims conv_weights_oihw = {this->num_output_, src_dims[1], ker_dims[1], ker_dims[2]}; 
-  memory::dims conv_bias_x = {this->num_output_}; 
+  memory::dims conv_weights_oihw = {this->num_output_, src_dims[1], ker_dims[1], ker_dims[2]};
+  memory::dims conv_bias_x = {this->num_output_};
   memory::dims conv_dst_nchw = {src_dims[0], this->num_output_, out_dims[1], out_dims[2]};
-  memory::dims conv_strides = {str_dims[1], str_dims[2]}; 
-  memory::dims conv_padding = {pad_dims[1], pad_dims[2]};   
+  memory::dims conv_strides = {str_dims[1], str_dims[2]};
+  memory::dims conv_padding = {pad_dims[1], pad_dims[2]};
 
   // creat memory descriptor
   auto conv_src_md = memory::desc({conv_src_nchw}, memory::data_type::f32, memory::format::nChw16c);
@@ -266,57 +266,54 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   auto conv_weights_bwd_md = memory::desc({conv_weights_oihw}, memory::data_type::f32, memory::format::OIhw16o16i);
 
   // creat convolution descriptor
-  auto conv_desc = convolution_forward::desc(prop_kind::forward, convolution_direct, 
-       conv_src_md, conv_weights_md, conv_bias_md, conv_dst_md, 
-       conv_strides, conv_padding, conv_padding, padding_kind::zero);
+  auto conv_desc = convolution_forward::desc(prop_kind::forward, convolution_direct,
+                                             conv_src_md, conv_weights_md, conv_bias_md, conv_dst_md,
+                                             conv_strides, conv_padding, conv_padding, padding_kind::zero);
   auto conv_fwd_pd = new convolution_forward::primitive_desc(conv_desc, *cpu_engine);
 
-  auto conv_bwd_data_desc = convolution_backward_data::desc(convolution_direct, 
-       conv_src_md, conv_weights_bwd_md, conv_dst_md, conv_strides, 
-       conv_padding, conv_padding, padding_kind::zero);
-  auto conv_bwd_data_pd = new convolution_backward_data::primitive_desc(
-       conv_bwd_data_desc, *cpu_engine, *conv_fwd_pd);
+  auto conv_bwd_data_desc = convolution_backward_data::desc(convolution_direct,
+                                                            conv_src_md, conv_weights_bwd_md, conv_dst_md, conv_strides,
+                                                            conv_padding, conv_padding, padding_kind::zero);
+  auto conv_bwd_data_pd = new convolution_backward_data::primitive_desc(conv_bwd_data_desc, *cpu_engine, *conv_fwd_pd);
 
   auto conv_bwd_wgts_desc = convolution_backward_weights::desc(convolution_direct,
-       conv_src_md, conv_weights_md, conv_bias_md, conv_dst_md, 
-       conv_strides, conv_padding, conv_padding, padding_kind::zero);
-  auto conv_bwd_wgts_pd = new convolution_backward_weights::primitive_desc(
-       conv_bwd_wgts_desc, *cpu_engine, *conv_fwd_pd);
+                                                               conv_src_md, conv_weights_md, conv_bias_md, conv_dst_md,
+                                                               conv_strides, conv_padding, conv_padding, padding_kind::zero);
+  auto conv_bwd_wgts_pd = new convolution_backward_weights::primitive_desc(conv_bwd_wgts_desc, *cpu_engine, *conv_fwd_pd);
 
   // creat slices sum descriptor
   auto sum_src_pd = conv_fwd_pd->dst_primitive_desc();
   auto sum_dst_md = sum_src_pd.desc();
   vector<memory::primitive_desc> sum_srcs_pd(ker_dims[0],sum_src_pd);
-  vector<double> sum_scale(ker_dims[0],1.0);
+  vector<double> sum_scale(ker_dims[0], 1.0);
   auto sum_fwd_pd = new sum::primitive_desc(sum_dst_md, sum_scale, sum_srcs_pd);
 
   auto sum_src_bwd_data_pd = conv_bwd_data_pd->diff_src_primitive_desc();
   auto sum_dst_bwd_data_md = sum_src_bwd_data_pd.desc();
-  vector<memory::primitive_desc> sum_srcs_bwd_data_pd(ker_dims[0],sum_src_bwd_data_pd);
+  vector<memory::primitive_desc> sum_srcs_bwd_data_pd(ker_dims[0], sum_src_bwd_data_pd);
   auto sum_bwd_data_pd = new sum::primitive_desc(sum_dst_bwd_data_md, sum_scale, sum_srcs_bwd_data_pd);
 
   auto sum_src_bwd_wgts_pd = conv_bwd_wgts_pd->diff_weights_primitive_desc();
   auto sum_dst_bwd_wgts_md = sum_src_bwd_wgts_pd.desc();
-  vector<memory::primitive_desc> sum_srcs_bwd_wgts_pd(bottom.size()*out_dims[0],sum_src_bwd_wgts_pd);
-  vector<double> sum_bwd_wgts_scale(bottom.size()*out_dims[0],1.0);
+  vector<memory::primitive_desc> sum_srcs_bwd_wgts_pd(bottom.size() * out_dims[0], sum_src_bwd_wgts_pd);
+  vector<double> sum_bwd_wgts_scale(bottom.size()*out_dims[0], 1.0);
   auto sum_bwd_wgts_pd = new sum::primitive_desc(sum_dst_bwd_wgts_md, sum_bwd_wgts_scale, sum_srcs_bwd_wgts_pd);
 
   auto sum_src_bwd_bias_pd = conv_bwd_wgts_pd->diff_bias_primitive_desc();
   auto sum_dst_bwd_bias_md = sum_src_bwd_bias_pd.desc();
-  vector<memory::primitive_desc> sum_srcs_bwd_bias_pd(bottom.size()*out_dims[0],sum_src_bwd_bias_pd);
-  vector<double> sum_bwd_bias_scale(bottom.size()*ker_dims[0]*out_dims[0],1.0);
+  vector<memory::primitive_desc> sum_srcs_bwd_bias_pd(bottom.size() * out_dims[0], sum_src_bwd_bias_pd);
+  vector<double> sum_bwd_bias_scale(bottom.size() * ker_dims[0] * out_dims[0], 1.0);
   auto sum_bwd_bias_pd = new sum::primitive_desc(sum_dst_bwd_bias_md, sum_bwd_bias_scale, sum_srcs_bwd_bias_pd);
-
 
   // init forward memory & pipeline
   pipeline_fwd.clear();
-  auto src_idx = [&](int od,int kd){ return od * str_dims[0] + kd - pad_dims[0]; };
+  auto src_idx = [&](int od, int kd){ return od * str_dims[0] + kd - pad_dims[0]; };
 
   for (int i = 0; i < bottom.size(); ++i) {
     for (int od = 0; od < out_dims[0]; ++od) {
       vector<primitive::at> sum_inputs;
       for (int kd = 0; kd < ker_dims[0]; ++kd) {
-        int id = src_idx(od,kd);
+        int id = src_idx(od, kd);
         auto conv_src_tmp = (id >= 0 && id < src_dims[2]) ?
             memory({conv_src_md, *cpu_engine}, conv_srcs.data() + i * bottom[0]->count() + id * src_slicesize):
             memory({conv_src_md, *cpu_engine}, src_zero_slice.data());
@@ -339,30 +336,32 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
 
   // init backward data memory & pipeline
   pipeline_bwd_data.clear();
-  auto dst_idx = [&](int id,int kd) { 
-    return (id+pad_dims[0]-kd) % str_dims[0] ? -1: (id + pad_dims[0] - kd) / str_dims[0]; 
+  auto dst_idx = [&](int id, int kd) { 
+    return (id+pad_dims[0] - kd) % str_dims[0] ? -1 : (id + pad_dims[0] - kd) / str_dims[0]; 
   };
 
   for (int i = 0; i < bottom.size(); ++i) {
     for (int id = 0; id < src_dims[2]; ++id) {
       vector<primitive::at> sum_inputs;
       for (int kd = 0; kd < ker_dims[0]; ++kd) {
-        int od = dst_idx(id,kd);
+        int od = dst_idx(id, kd);
         auto conv_dst_diff_tmp = (od >= 0 && od < out_dims[0]) ?
             memory({conv_dst_md, *cpu_engine},
             conv_dsts_diff.data() + i * top[0]->count() + od * dst_slicesize):
             memory({conv_dst_md, *cpu_engine}, dst_zero_slice.data());
         conv_src_diff_mem.push_back(memory(conv_bwd_data_pd->diff_src_primitive_desc()));
         conv_wgts_bwd_mem.push_back(memory({conv_weights_bwd_md, *cpu_engine},
-            conv_weight_bwd.data() + kd * wgt_slicesize));
+                                    conv_weight_bwd.data() + kd * wgt_slicesize));
         conv_dst_diff_mem.push_back(conv_dst_diff_tmp); 
-        conv_bwds_data.push_back(convolution_backward_data(*conv_bwd_data_pd, 
-            conv_dst_diff_mem.back(), conv_wgts_bwd_mem.back(), conv_src_diff_mem.back()));
+        conv_bwds_data.push_back(convolution_backward_data(*conv_bwd_data_pd,
+                                                           conv_dst_diff_mem.back(),
+                                                           conv_wgts_bwd_mem.back(),
+                                                           conv_src_diff_mem.back()));
         sum_inputs.push_back(conv_src_diff_mem.back());
         pipeline_bwd_data.push_back(conv_bwds_data.back());
       }
       sum_dst_bwd_data_mem.push_back(memory(sum_bwd_data_pd->dst_primitive_desc(),
-        conv_srcs_diff.data()+i*bottom[0]->count()+id*src_slicesize));
+                                     conv_srcs_diff.data() + i * bottom[0]->count() + id * src_slicesize));
       sums_bwds_data.push_back(sum(*sum_bwd_data_pd, sum_inputs, sum_dst_bwd_data_mem.back()));
       pipeline_bwd_data.push_back(sums_bwds_data.back());
     }
@@ -376,7 +375,7 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
     vector<primitive::at> sum_wgts_inputs;
     for (int i = 0; i < bottom.size(); ++i) {
       for (int od = 0; od < out_dims[0]; ++od) {
-        int id = src_idx(od,kd);
+        int id = src_idx(od, kd);
         auto conv_src_tmp = (id >= 0 && id < src_dims[2]) ?
             memory({conv_src_md, *cpu_engine},
             conv_srcs.data() + i * bottom[0]->count() + id * src_slicesize):
@@ -387,19 +386,21 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
         conv_wgts_diff_mem.push_back(memory(conv_bwd_wgts_pd->diff_weights_primitive_desc()));
         conv_bias_diff_mem.push_back(memory(conv_bwd_wgts_pd->diff_bias_primitive_desc()));
         conv_bwds_wgts.push_back(convolution_backward_weights(*conv_bwd_wgts_pd,
-            conv_src_mem.back(), conv_dst_diff_mem.back(), 
-            conv_wgts_diff_mem.back(), conv_bias_diff_mem.back()));
+                                                              conv_src_mem.back(),
+                                                              conv_dst_diff_mem.back(),
+                                                              conv_wgts_diff_mem.back(),
+                                                              conv_bias_diff_mem.back()));
         sum_bias_inputs.push_back(conv_bias_diff_mem.back());
         sum_wgts_inputs.push_back(conv_wgts_diff_mem.back());
         pipeline_bwd_wgts.push_back(conv_bwds_wgts.back());
       }
     }
     sum_dst_bwd_wgts_mem.push_back(memory(sum_bwd_wgts_pd->dst_primitive_desc(),
-        conv_weight_diff.data() + kd * wgt_slicesize));
+                                          conv_weight_diff.data() + kd * wgt_slicesize));
     sums_bwds_wgts.push_back(sum(*sum_bwd_wgts_pd, sum_wgts_inputs, sum_dst_bwd_wgts_mem.back()));
     pipeline_bwd_wgts.push_back(sums_bwds_wgts.back());
   }
-  sum_dst_bwd_bias_mem.push_back(memory(sum_bwd_bias_pd->dst_primitive_desc(),conv_bias_diff.data()));
+  sum_dst_bwd_bias_mem.push_back(memory(sum_bwd_bias_pd->dst_primitive_desc(), conv_bias_diff.data()));
   sums_bwds_bias.push_back(sum(*sum_bwd_bias_pd, sum_bias_inputs, sum_dst_bwd_bias_mem.back()));
   pipeline_bwd_wgts.push_back(sums_bwds_bias.back());
 }
@@ -414,7 +415,7 @@ void ConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
     if (src_dims.size()) {
       if (bottom_dims[i] != src_dims[i]) {
         reinitialize = true;
-        std::cout<< "reinitialize." << std::endl;
+        LOG(ERROR) << "reinitialize";
         break;
       }
     } else {
@@ -423,8 +424,8 @@ void ConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   }
 
   if (reinitialize == true) {
-    BaseConvolutionLayer<Dtype>::Reshape(bottom,top);
-    for (int i = 0; i < this->num_spatial_axes_ + 2; ++i){
+    BaseConvolutionLayer<Dtype>::Reshape(bottom, top);
+    for (int i = 0; i < this->num_spatial_axes_ + 2; ++i) {
       src_dims.push_back(bottom_dims[i]);
     }
     if (useAVX_t != 0) {
