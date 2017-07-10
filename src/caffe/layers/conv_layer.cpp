@@ -656,10 +656,10 @@ void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       if (this->param_propagate_down_[0]) {
       #ifdef _OPENMP
         
-        if (this->num_of_threads_ > 1 && (this->num_spatial_axes_ == 2)) {
+        if (this->num_of_threads_ > 1) {
           this->clear_weight_mt();
         }
-        #pragma omp parallel if((this->num_of_threads_ > 1) && (this->num_spatial_axes_ == 2)) num_threads(this->num_of_threads_)
+        #pragma omp parallel if(this->num_of_threads_ > 1) num_threads(this->num_of_threads_)
       #endif
         {
       #ifdef _OPENMP
@@ -672,7 +672,7 @@ void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
           }
 
       #ifdef _OPENMP
-          if (this->num_of_threads_ > 1 && (this->num_spatial_axes_ == 2)) {
+          if (this->num_of_threads_ > 1) {
             this->sum_weight_mt(weight_diff);
           }
       #endif
@@ -681,7 +681,7 @@ void ConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
 
       if (propagate_down[i]) {
       #ifdef _OPENMP
-        #pragma omp parallel if((this->num_of_threads_ > 1) && (this->num_spatial_axes_ == 2)) num_threads(this->num_of_threads_)
+        #pragma omp parallel if(this->num_of_threads_ > 1) num_threads(this->num_of_threads_)
         {
           #pragma omp for
       #endif
