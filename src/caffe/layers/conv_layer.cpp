@@ -120,7 +120,7 @@ void ConvolutionLayer<Dtype>::Reorder(Dtype* output, Blob<Dtype>* data_blob,
         #pragma omp parallel for collapse(6) schedule(static)
         for (int d = 0; d < dims[2]; d++) {
           for (int n = 0; n < dims[0]; ++n) {
-            for (int C = 0; C < dims[1]/cblk; ++C) {
+            for (int C = 0; C < dims[1] / cblk; ++C) {
 	      for (int h = 0; h < dims[3]; ++h) {
 	        for (int w = 0; w < dims[4]; ++w) {
                   for (int c = 0; c < cblk; ++c) {
@@ -158,7 +158,7 @@ void ConvolutionLayer<Dtype>::Reorder(Dtype* output, Blob<Dtype>* data_blob,
         int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
 
         #pragma omp parallel for collapse(7) schedule(static)
-        for (int d = 0; d < dims[2]; ++d){
+        for (int d = 0; d < dims[2]; ++d) {
           for (int O = 0; O < dims[0] / cblk; ++O) {
             for (int I = 0; I < dims[1] / cblk; ++I) {
               for (int h = 0; h < dims[3]; ++h) {
@@ -501,15 +501,15 @@ void ConvolutionLayer<Dtype>::Forward_3D(const vector<Blob<Dtype>*>& bottom,
     bias = NULL;
   }
 
-  Reorder(conv_weight.data(), weight, 1, useAVX_t, false);
-  Reorder(conv_bias.data(), bias, 2, useAVX_t, false);
+  Reorder(conv_weight.data(), weight, 1, useAVX_t, false, false);
+  Reorder(conv_bias.data(), bias, 2, useAVX_t, false, false);
   for (int i = 0; i < bottom.size(); ++i) {
-    Reorder(conv_srcs.data()+i*bottom[0]->count(), bottom[i], 0, useAVX_t, false);
+    Reorder(conv_srcs.data() + i * bottom[0]->count(), bottom[i], 0, useAVX_t, false, false);
   }
   srcsync = true;
   stream(stream::kind::eager).submit(pipeline_fwd).wait();
   for (int i = 0; i < bottom.size(); ++i) {
-    Reorder(conv_dsts.data()+i*top[0]->count(), top[i], 0, useAVX_t, true);
+    Reorder(conv_dsts.data() + i * top[0]->count(), top[i], 0, useAVX_t, true, false);
   }
 }
 
@@ -520,11 +520,11 @@ void ConvolutionLayer<Dtype>::Backward_data_3D(const vector<Blob<Dtype>*>& botto
 
   Reorder(conv_weight_bwd.data(), weight, 3, useAVX_t, false);
   for (int i = 0; i < top.size(); ++i) {
-    Reorder(conv_dsts_diff.data()+i*top[0]->count(), top[i], 0, useAVX_t, false, true);
+    Reorder(conv_dsts_diff.data() + i * top[0]->count(), top[i], 0, useAVX_t, false, true);
   }
   stream(stream::kind::eager).submit(pipeline_bwd_data).wait();
   for (int i = 0; i < bottom.size(); ++i) {
-    Reorder(conv_srcs_diff.data()+i*bottom[0]->count(), bottom[i], 0, useAVX_t, true, true);
+    Reorder(conv_srcs_diff.data() + i * bottom[0]->count(), bottom[i], 0, useAVX_t, true, true);
   }
 }
 
@@ -541,7 +541,7 @@ void ConvolutionLayer<Dtype>::Backward_weights_3D(const vector<Blob<Dtype>*>& bo
 
   if (!srcsync) {
     for (int i = 0; i < bottom.size(); ++i) {
-      Reorder(conv_srcs.data()+i*bottom[0]->count(), bottom[i], 0, useAVX_t, false);
+      Reorder(conv_srcs.data() + i * bottom[0]->count(), bottom[i], 0, useAVX_t, false, false);
     }
   }
   stream(stream::kind::eager).submit(pipeline_bwd_wgts).wait();
