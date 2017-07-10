@@ -105,32 +105,34 @@ void ConvolutionLayer<Dtype>::Reorder(Dtype* output, Blob<Dtype>* data_blob,
   switch (reorder_t) {
     case 0:
       // reorder fwd src
-      int nblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
-      int cblk_size_i = dims[2] * dims[3] * dims[4];
-      int Cblk_size_i = cblk * cblk_size_i;
-      int dblk_size_i = dims[3] * dims[4];
-      int hblk_size_i = dims[4];
+      {
+        int nblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
+        int cblk_size_i = dims[2] * dims[3] * dims[4];
+        int Cblk_size_i = cblk * cblk_size_i;
+        int dblk_size_i = dims[3] * dims[4];
+        int hblk_size_i = dims[4];
 
-      int nblk_size_o = dims[1] * dims[3] * dims[4];
-      int Cblk_size_o = cblk * dims[3] * dims[4];
-      int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
-      int hblk_size_o = cblk * dims[4];
+        int nblk_size_o = dims[1] * dims[3] * dims[4];
+        int Cblk_size_o = cblk * dims[3] * dims[4];
+        int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
+        int hblk_size_o = cblk * dims[4];
 
-      #pragma omp parallel for collapse(6) schedule(static)
-      for (int d = 0; d < dims[2]; d++) {
-        for (int n = 0; n < dims[0]; ++n) {
-          for (int C = 0; C < dims[1]/cblk; ++C) {
-	    for (int h = 0; h < dims[3]; ++h) {
-	      for (int w = 0; w < dims[4]; ++w) {
-                for (int c = 0; c < cblk; ++c) {
-                  int off_i = n * nblk_size_i + C * Cblk_size_i + d * dblk_size_i +
-		              h * hblk_size_i + c * cblk_size_i + w;
-                  int off_o = d * dblk_size_o + n * nblk_size_o + C * Cblk_size_o +
-                              h * hblk_size_o + w * cblk + c;
-                  if (!reverse) {
-                    output[off_o] = input[off_i];
-                  } else {
-                    input[off_i] = output[off_o];
+        #pragma omp parallel for collapse(6) schedule(static)
+        for (int d = 0; d < dims[2]; d++) {
+          for (int n = 0; n < dims[0]; ++n) {
+            for (int C = 0; C < dims[1]/cblk; ++C) {
+	      for (int h = 0; h < dims[3]; ++h) {
+	        for (int w = 0; w < dims[4]; ++w) {
+                  for (int c = 0; c < cblk; ++c) {
+                    int off_i = n * nblk_size_i + C * Cblk_size_i + d * dblk_size_i +
+		                h * hblk_size_i + c * cblk_size_i + w;
+                    int off_o = d * dblk_size_o + n * nblk_size_o + C * Cblk_size_o +
+                                h * hblk_size_o + w * cblk + c;
+                    if (!reverse) {
+                      output[off_o] = input[off_i];
+                    } else {
+                      input[off_i] = output[off_o];
+                    }
                   }
                 }
               }
@@ -141,37 +143,39 @@ void ConvolutionLayer<Dtype>::Reorder(Dtype* output, Blob<Dtype>* data_blob,
       break;
     case 1:
       // reorder fwd weight
-      int oblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
-      int Oblk_size_i = cblk * oblk_size_i;
-      int iblk_size_i = dims[2] * dims[3] * dims[4];
-      int Iblk_size_i = cblk * iblk_size_i;
-      int hblk_size_i = dims[4];
-      int dblk_size_i = dims[3] * dims[4];
+      {
+        int oblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
+        int Oblk_size_i = cblk * oblk_size_i;
+        int iblk_size_i = dims[2] * dims[3] * dims[4];
+        int Iblk_size_i = cblk * iblk_size_i;
+        int hblk_size_i = dims[4];
+        int dblk_size_i = dims[3] * dims[4];
 
-      int wblk_size_o = cblk * cblk;
-      int hblk_size_o = dims[4] * wblk_size_o;
-      int Iblk_size_o = dims[3] * hblk_size_o;
-      int Oblk_size_o = dims[1] / cblk * Iblk_size_o;
-      int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
+        int wblk_size_o = cblk * cblk;
+        int hblk_size_o = dims[4] * wblk_size_o;
+        int Iblk_size_o = dims[3] * hblk_size_o;
+        int Oblk_size_o = dims[1] / cblk * Iblk_size_o;
+        int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
 
-      #pragma omp parallel for collapse(7) schedule(static)
-      for (int d = 0; d < dims[2]; ++d){
-        for (int O = 0; O < dims[0] / cblk; ++O) {
-          for (int I = 0; I < dims[1] / cblk; ++I) {
-            for (int h = 0; h < dims[3]; ++h) {
-              for (int w  = 0; w < dims[4]; ++w) {
-                for (int ic = 0; ic < cblk; ++ic) {
-                  for (int oc = 0; oc < cblk; ++oc) {
-                    int off_i = O * Oblk_size_i + I * Iblk_size_i + d * dblk_size_i +
-                                h * hblk_size_i + ic * iblk_size_i + oc * oblk_size_i + w;
-                    int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
-                                h * hblk_size_o + w * wblk_size_o + ic * cblk + oc;
-                    if (!reverse) {
-                      output[off_o] = input[off_i];
-                    } else {
-                      input[off_i] = output[off_o];
-                    }
-		  }
+        #pragma omp parallel for collapse(7) schedule(static)
+        for (int d = 0; d < dims[2]; ++d){
+          for (int O = 0; O < dims[0] / cblk; ++O) {
+            for (int I = 0; I < dims[1] / cblk; ++I) {
+              for (int h = 0; h < dims[3]; ++h) {
+                for (int w  = 0; w < dims[4]; ++w) {
+                  for (int ic = 0; ic < cblk; ++ic) {
+                    for (int oc = 0; oc < cblk; ++oc) {
+                      int off_i = O * Oblk_size_i + I * Iblk_size_i + d * dblk_size_i +
+                                  h * hblk_size_i + ic * iblk_size_i + oc * oblk_size_i + w;
+                      int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
+                                  h * hblk_size_o + w * wblk_size_o + ic * cblk + oc;
+                      if (!reverse) {
+                        output[off_o] = input[off_i];
+                      } else {
+                        input[off_i] = output[off_o];
+                      }
+		    }
+                  }
                 }
               }
             }
@@ -191,35 +195,37 @@ void ConvolutionLayer<Dtype>::Reorder(Dtype* output, Blob<Dtype>* data_blob,
       break;
     case 3:
       // reorder bwd weight
-      int oblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
-      int Oblk_size_i = cblk * oblk_size_i;
-      int iblk_size_i = dims[2] * dims[3] * dims[4];
-      int Iblk_size_i = cblk * iblk_size_i;
-      int hblk_size_i = dims[4];
-      int dblk_size_i = dims[3] * dims[4];
+      {
+        int oblk_size_i = dims[1] * dims[2] * dims[3] * dims[4];
+        int Oblk_size_i = cblk * oblk_size_i;
+        int iblk_size_i = dims[2] * dims[3] * dims[4];
+        int Iblk_size_i = cblk * iblk_size_i;
+        int hblk_size_i = dims[4];
+        int dblk_size_i = dims[3] * dims[4];
 
-      int wblk_size_o = cblk * cblk;
-      int hblk_size_o = dims[4] * wblk_size_o;
-      int Iblk_size_o = dims[3] * hblk_size_o;
-      int Oblk_size_o = dims[1] / cblk * Iblk_size_o;
-      int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
+        int wblk_size_o = cblk * cblk;
+        int hblk_size_o = dims[4] * wblk_size_o;
+        int Iblk_size_o = dims[3] * hblk_size_o;
+        int Oblk_size_o = dims[1] / cblk * Iblk_size_o;
+        int dblk_size_o = dims[0] * dims[1] * dims[3] * dims[4];
 
-      #pragma omp parallel for collapse(7) schedule(static)
-      for (int d = 0; d < dims[2]; ++d) {
-        for (int O = 0; O < dims[0] / cblk; ++O) {
-          for (int I = 0; I < dims[1] / cblk; ++I) {
-            for (int h = 0; h < dims[3]; ++h) {
-              for (int w  = 0; w < dims[4]; ++w) {
-                for (int oc = 0; oc < cblk; ++oc) {
-                  for (int ic = 0; ic < cblk; ++ic) {
-                    int off_i = O * Oblk_size_i + I * Iblk_size_i + d * dblk_size_i +
-                                h * hblk_size_i + ic * iblk_size_i + oc * oblk_size_i + w;
-                    int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
-                                h * hblk_size_o + w * wblk_size_o + oc * cblk + ic;
-                    if (!reverse) {
-                      output[off_o] = input[off_i];
-                    } else {
-                      input[off_i] = output[off_o];
+        #pragma omp parallel for collapse(7) schedule(static)
+        for (int d = 0; d < dims[2]; ++d) {
+          for (int O = 0; O < dims[0] / cblk; ++O) {
+            for (int I = 0; I < dims[1] / cblk; ++I) {
+              for (int h = 0; h < dims[3]; ++h) {
+                for (int w  = 0; w < dims[4]; ++w) {
+                  for (int oc = 0; oc < cblk; ++oc) {
+                    for (int ic = 0; ic < cblk; ++ic) {
+                      int off_i = O * Oblk_size_i + I * Iblk_size_i + d * dblk_size_i +
+                                  h * hblk_size_i + ic * iblk_size_i + oc * oblk_size_i + w;
+                      int off_o = d * dblk_size_o + O * Oblk_size_o + I * Iblk_size_o +
+                                  h * hblk_size_o + w * wblk_size_o + oc * cblk + ic;
+                      if (!reverse) {
+                        output[off_o] = input[off_i];
+                      } else {
+                        input[off_i] = output[off_o];
+                      }
                     }
                   }
                 }
