@@ -34,8 +34,6 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
-
-
 #include <algorithm>
 #include <cfloat>
 #include <vector>
@@ -53,10 +51,8 @@ template <typename Dtype>
 void ROIPoolingLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
   ROIPoolingParameter roi_pool_param = this->layer_param_.roi_pooling_param();
-  CHECK_GT(roi_pool_param.pooled_h(), 0)
-      << "pooled_h must be > 0";
-  CHECK_GT(roi_pool_param.pooled_w(), 0)
-      << "pooled_w must be > 0";
+  CHECK_GT(roi_pool_param.pooled_h(), 0) << "pooled_h must be > 0";
+  CHECK_GT(roi_pool_param.pooled_w(), 0) << "pooled_w must be > 0";
   pooled_height_ = roi_pool_param.pooled_h();
   pooled_width_ = roi_pool_param.pooled_w();
   spatial_scale_ = roi_pool_param.spatial_scale();
@@ -69,10 +65,8 @@ void ROIPoolingLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   channels_ = bottom[0]->channels();
   height_ = bottom[0]->height();
   width_ = bottom[0]->width();
-  top[0]->Reshape(bottom[1]->num(), channels_, pooled_height_,
-      pooled_width_);
-  max_idx_.Reshape(bottom[1]->num(), channels_, pooled_height_,
-      pooled_width_);
+  top[0]->Reshape(bottom[1]->num(), channels_, pooled_height_, pooled_width_);
+  max_idx_.Reshape(bottom[1]->num(), channels_, pooled_height_, pooled_width_);
 }
 
 template <typename Dtype>
@@ -83,7 +77,7 @@ void ROIPoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   // Number of ROIs
   int num_rois = bottom[1]->num();
   int batch_size = bottom[0]->num();
-  int top_count = top[0]->count();
+  size_t top_count = top[0]->count();
   Dtype* top_data = top[0]->mutable_cpu_data();
   caffe_set(top_count, Dtype(-FLT_MAX), top_data);
   int* argmax_data = max_idx_.mutable_cpu_data();
@@ -101,10 +95,8 @@ void ROIPoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 
     int roi_height = max(roi_end_h - roi_start_h + 1, 1);
     int roi_width = max(roi_end_w - roi_start_w + 1, 1);
-    const Dtype bin_size_h = static_cast<Dtype>(roi_height)
-                             / static_cast<Dtype>(pooled_height_);
-    const Dtype bin_size_w = static_cast<Dtype>(roi_width)
-                             / static_cast<Dtype>(pooled_width_);
+    const Dtype bin_size_h = static_cast<Dtype>(roi_height) / static_cast<Dtype>(pooled_height_);
+    const Dtype bin_size_w = static_cast<Dtype>(roi_width) / static_cast<Dtype>(pooled_width_);
 
     const Dtype* batch_data = bottom_data + bottom[0]->offset(roi_batch_ind);
 
@@ -164,6 +156,7 @@ void ROIPoolingLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     LOG(FATAL) << this->type()
                << " Layer cannot backpropagate to roi inputs.";
   }
+
   if (!propagate_down[0]) {
     return;
   }
@@ -181,12 +174,10 @@ void ROIPoolingLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     for (int c = 0; c < channels_; ++c) {
       for (int ph = 0; ph < pooled_height_; ++ph) {
         for (int pw = 0; pw < pooled_width_; ++pw) {
-          int offset_top = ((roi_n * channels_ + c) * pooled_height_ + ph)
-              * pooled_width_ + pw;
+          int offset_top = ((roi_n * channels_ + c) * pooled_height_ + ph) * pooled_width_ + pw;
           int argmax_index = argmax_data[offset_top];
           if (argmax_index >= 0) {
-            int offset_bottom = (roi_batch_ind * channels_ + c) * height_
-                * width_ + argmax_index;
+            int offset_bottom = (roi_batch_ind * channels_ + c) * height_ * width_ + argmax_index;
             bottom_diff[offset_bottom] += top_diff[offset_top];
           }
         }

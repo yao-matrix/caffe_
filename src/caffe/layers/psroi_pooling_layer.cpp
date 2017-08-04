@@ -93,7 +93,6 @@ namespace caffe {
       bottom[1]->num(), output_dim_, pooled_height_, pooled_width_);
   }
 
-
   template <typename Dtype>
   static void PSROIPoolingForward(
     const int num,
@@ -110,9 +109,9 @@ namespace caffe {
       // LOG(INFO) << "psroi pooling cpu_forward";
       int pixels = width * height;
 #ifdef _OPENMP
-	#pragma omp parallel for
+      #pragma omp parallel for
 #endif
-     for (int n = 0; n < num; ++n) {
+      for (int n = 0; n < num; ++n) {
         // per roi
 
         int roi_add = n * 5;
@@ -214,7 +213,7 @@ namespace caffe {
 	// LOG(INFO) << "psroipooling backward cpu";
     int pixels = height * width;
 #ifdef _OPENMP
- 	#pragma omp parallel for
+    #pragma omp parallel for
 #endif
     for (int i = 0; i < num; ++i) {
       // The output is in order (n, ctop, ph, pw)
