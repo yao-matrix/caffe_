@@ -25,12 +25,12 @@
  - [x] 2D ROI Pooling Layer (OpenMP optimized, for fast r-cnn/faster r-cnn)
  - [x] 2D PS-ROI Pooling Layer (OpenMP optimized, for r-fcn)
  - [x] 2D Spatial Dropout Layer (OpenMP optimized, for unet)
- - []  2D ROI Align (for mask r-cnn)
+ - [ ] 2D ROI Align (for mask r-cnn)
  - [x] 3D Convolution (in Convolution layer, MKL-DNN primitives and openMP optimized)
  - [x] 3D Pooling (in Pooling layer, openMP optimized)
  - [x] 3D Batch Normalization (in BatchNorm layer, MKL2017 and openMP optimzied)
  - [x] 3D Permute (in Permute layer, for SSD)
- - []  3D ROI Pooling
+ - [ ] 3D ROI Pooling
 
 ## Call For Contributions
 - Anything helps this repo, including **discussion**, **testing**, **promotion** and of course **your awesome code**.
