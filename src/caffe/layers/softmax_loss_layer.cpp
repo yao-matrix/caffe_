@@ -44,8 +44,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace caffe {
 
-#define _EPSILON Dtype(1e-8)
-
 template <typename Dtype>
 void SoftmaxWithLossLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
@@ -201,8 +199,7 @@ void SoftmaxWithLossLayer<Dtype>::Forward_cpu(
       // LOG(ERROR) << "outer num: " << outer_num_ << ", inner_num_: " << inner_num_;
       // LOG(ERROR) << "count: " << count << ", loss: " << loss;
 
-      Dtype normalizer = LossLayer<Dtype>::GetNormalizer(normalization_, outer_num_, inner_num_, count);
-      top[0]->mutable_cpu_data()[0] = loss / normalizer;
+      top[0]->mutable_cpu_data()[0] = loss / get_normalizer(normalization_, count);;
       if (top.size() == 2) {
         top[1]->ShareData(prob_);
       }
@@ -302,8 +299,7 @@ void SoftmaxWithLossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
           }
         }
         // Scale gradient
-        Dtype normalizer = LossLayer<Dtype>::GetNormalizer(normalization_, outer_num_, inner_num_, count);
-        Dtype loss_weight = top[0]->cpu_diff()[0] / normalizer;
+        Dtype loss_weight = top[0]->cpu_diff()[0] / get_normalizer(normalization_, count);
         caffe_scal(prob_.count(), loss_weight, bottom_diff);
     }
 }
