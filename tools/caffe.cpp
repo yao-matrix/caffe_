@@ -313,6 +313,7 @@ int train() {
     CopyLayers(solver.get(), FLAGS_weights);
   }
 
+  LOG(INFO) << "Starting Optimization";
 #ifdef USE_MLSL
   if (MLSL::GetNumNodes() > 1) {
     LOG(INFO) << "Configuring multinode setup";
@@ -323,8 +324,12 @@ int train() {
 #endif /* USE_MLSL */
 
   if (gpus.size() > 1) {
-    caffe::P2PSync<float> sync(solver, NULL, solver->param());
-    sync.Run(gpus);
+#ifdef USE_NCCL
+    caffe::NCCL<float> nccl(solver);
+    nccl.Run(gpus, FLAGS_snapshot.size() > 0 ? FLAGS_snapshot.c_str() : NULL);
+#else
+    LOG(FATAL) << "Multi-GPU execution not available - rebuild with USE_NCCL";
+#endif
   } else {
     LOG(INFO) << "Starting Optimization";
     solver->Solve();
@@ -611,7 +616,7 @@ int time() {
 }
 RegisterBrewFunction(time);
 
-// collect & compare: Debugging extansion for CPU-GPU functional comparison
+// collect & compare: Debugging extension for CPU-GPU functional comparison
 #include <stdio.h>
 #include "caffe/util/compareToolUtilities.h"
 
