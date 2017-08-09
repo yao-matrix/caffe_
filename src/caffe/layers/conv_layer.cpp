@@ -502,16 +502,16 @@ void ConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   if (reinitialize == true) {
     BaseConvolutionLayer<Dtype>::Reshape(bottom, top);
  
-    this->col_buffer_.Reshape(1, 1, 1, 1);
-    vector<Dtype>().swap(this->col_buffer_mt_);
-    vector<Dtype>().swap(this->weight_diff_mt_);
-
     src_dims.clear();
     for (int i = 0; i < this->num_spatial_axes_ + 2; ++i) {
       src_dims.push_back(bottom_dims[i]);
     }
     if (useAVX_t != 0) {
       try {
+        this->col_buffer_.Reshape(1, 1, 1, 1);
+        vector<Dtype>().swap(this->col_buffer_mt_);
+        vector<Dtype>().swap(this->weight_diff_mt_);
+
         ReshapeForMKLdnn(bottom, top);
       } catch (error& e) {
         if (e.status == mkldnn_out_of_memory) {
