@@ -266,56 +266,19 @@ message SolverParameter {
   // A test_level and/or a test_stage may also be specified for each test_net.
   //////////////////////////////////////////////////////////////////////////////
 
-  // Proto filename for the train net, possibly combined with one or more
-  // test nets.
-  optional string net = 24;
-  // Inline train net param, possibly combined with one or more test nets.
-  optional NetParameter net_param = 25;
-
   optional string train_net = 1; // Proto filename for the train net.
   repeated string test_net = 2; // Proto filenames for the test nets.
-  optional NetParameter train_net_param = 21; // Inline train net params.
-  repeated NetParameter test_net_param = 22; // Inline test net params.
-
-  // The states for the train/test nets. Must be unspecified or
-  // specified once per net.
-  //
-  // By default, all states will have solver = true;
-  // train_state will have phase = TRAIN,
-  // and all test_state's will have phase = TEST.
-  // Other defaults are set according to the NetState defaults.
-  optional NetState train_state = 26;
-  repeated NetState test_state = 27;
-
-  // Evaluation type.
-  optional string eval_type = 41 [default = "classification"];
-  // ap_version: different ways of computing Average Precision.
-  //    Check https://sanchom.wordpress.com/tag/average-precision/ for details.
-  //    11point: the 11-point interpolated average precision. Used in VOC2007.
-  //    MaxIntegral: maximally interpolated AP. Used in VOC2012/ILSVRC.
-  //    Integral: the natural integral of the precision-recall curve.
-  optional string ap_version = 42 [default = "Integral"];
-  // If true, display per class result.
-  optional bool show_per_class_result = 43 [default = false];
 
   // The number of iterations for each test net.
   repeated int32 test_iter = 3;
 
   // The number of iterations between two testing phases.
   optional int32 test_interval = 4 [default = 0];
-  optional bool test_compute_loss = 19 [default = false];
-  // If true, run an initial test pass before the first iteration,
-  // ensuring memory availability and printing the starting value of the loss.
-  optional bool test_initialization = 32 [default = true];
   optional float base_lr = 5; // The base learning rate
   // the number of iterations between displaying info. If display = 0, no info
   // will be displayed.
   optional int32 display = 6;
-  // Display the loss averaged over the last average_loss iterations
-  optional int32 average_loss = 33 [default = 1];
   optional int32 max_iter = 7; // the maximum number of iterations
-  // accumulate gradients over `iter_size` x `batch_size` instances
-  optional int32 iter_size = 36 [default = 1];
 
   // The learning rate decay policy. The currently implemented learning rate
   // policies are as follows:
@@ -339,62 +302,62 @@ message SolverParameter {
   optional float power = 10; // The parameter to compute the learning rate.
   optional float momentum = 11; // The momentum value.
   optional float weight_decay = 12; // The weight decay.
-  // regularization types supported: L1 and L2
-  // controlled by weight_decay
-  optional string regularization_type = 29 [default = "L2"];
+
   // the stepsize for learning rate policy "step"
   optional int32 stepsize = 13;
-  // the stepsize for learning rate policy "multistep"
-  repeated int32 stepvalue = 34;
-  // the stepsize for learning rate policy "plateau"
-  repeated int32 plateau_winsize = 44;
-
-  // Set clip_gradients to >= 0 to clip parameter gradients to that L2 norm,
-  // whenever their actual L2 norm is larger.
-  optional float clip_gradients = 35 [default = -1];
 
   optional int32 snapshot = 14 [default = 0]; // The snapshot interval
   optional string snapshot_prefix = 15; // The prefix for the snapshot.
   // whether to snapshot diff in the results or not. Snapshotting diff will help
   // debugging but the final protocol buffer size will be much larger.
   optional bool snapshot_diff = 16 [default = false];
-  enum SnapshotFormat {
-    HDF5 = 0;
-    BINARYPROTO = 1;
-  }
-  optional SnapshotFormat snapshot_format = 37 [default = BINARYPROTO];
+
   // the mode solver will use: 0 for CPU and 1 for GPU. Use GPU in default.
   enum SolverMode {
     CPU = 0;
     GPU = 1;
   }
   optional SolverMode solver_mode = 17 [default = GPU];
+
   // the device_id will that be used in GPU mode. Use device_id = 0 in default.
   optional int32 device_id = 18 [default = 0];
+
+  optional bool test_compute_loss = 19 [default = false];
+
   // If non-negative, the seed with which the Solver will initialize the Caffe
   // random number generator -- useful for reproducible results. Otherwise,
   // (and by default) initialize using a seed derived from the system clock.
   optional int64 random_seed = 20 [default = -1];
 
-  // type of the solver
-  optional string type = 40 [default = "SGD"];
-
-  // numerical stability for RMSProp, AdaGrad and AdaDelta and Adam
-  optional float delta = 31 [default = 1e-8];
-  // parameters for the Adam solver
-  optional float momentum2 = 39 [default = 0.999];
-
-  // RMSProp decay value
-  // MeanSquare(t) = rms_decay*MeanSquare(t-1) + (1-rms_decay)*SquareGradient(t)
-  optional float rms_decay = 38 [default = 0.99];
+  optional NetParameter train_net_param = 21; // Inline train net params.
+  repeated NetParameter test_net_param = 22; // Inline test net params.
 
   // If true, print information about the state of the net that may help with
   // debugging learning problems.
   optional bool debug_info = 23 [default = false];
-  optional bool time_info = 99 [default = false];
+
+  // Proto filename for the train net, possibly combined with one or more
+  // test nets.
+  optional string net = 24;
+  // Inline train net param, possibly combined with one or more test nets.
+  optional NetParameter net_param = 25;
+
+  // The states for the train/test nets. Must be unspecified or
+  // specified once per net.
+  //
+  // By default, all states will have solver = true;
+  // train_state will have phase = TRAIN,
+  // and all test_state's will have phase = TEST.
+  // Other defaults are set according to the NetState defaults.
+  optional NetState train_state = 26;
+  repeated NetState test_state = 27;
 
   // If false, don't save a snapshot after training finishes.
   optional bool snapshot_after_train = 28 [default = true];
+
+  // regularization types supported: L1 and L2
+  // controlled by weight_decay
+  optional string regularization_type = 29 [default = "L2"];
 
   // DEPRECATED: old solver enum types, use string instead
   enum SolverType {
@@ -408,11 +371,64 @@ message SolverParameter {
   // DEPRECATED: use type instead of solver_type
   optional SolverType solver_type = 30 [default = SGD];
 
+  // numerical stability for RMSProp, AdaGrad and AdaDelta and Adam
+  optional float delta = 31 [default = 1e-8];
+
+  // If true, run an initial test pass before the first iteration,
+  // ensuring memory availability and printing the starting value of the loss.
+  optional bool test_initialization = 32 [default = true];
+
+  // Display the loss averaged over the last average_loss iterations
+  optional int32 average_loss = 33 [default = 1];
+
+  // the stepsize for learning rate policy "multistep"
+  repeated int32 stepvalue = 34;
+
+  // Set clip_gradients to >= 0 to clip parameter gradients to that L2 norm,
+  // whenever their actual L2 norm is larger.
+  optional float clip_gradients = 35 [default = -1];
+
+  // accumulate gradients over `iter_size` x `batch_size` instances
+  optional int32 iter_size = 36 [default = 1];
+
+  enum SnapshotFormat {
+    HDF5 = 0;
+    BINARYPROTO = 1;
+  }
+  optional SnapshotFormat snapshot_format = 37 [default = BINARYPROTO];
+
+  // RMSProp decay value
+  // MeanSquare(t) = rms_decay*MeanSquare(t-1) + (1-rms_decay)*SquareGradient(t)
+  optional float rms_decay = 38 [default = 0.99];
+
+  // parameters for the Adam solver
+  optional float momentum2 = 39 [default = 0.999];
+
+  // type of the solver
+  optional string type = 40 [default = "SGD"];
+
   // Overlap compute and communication for data parallel training
   optional bool layer_wise_reduce = 41 [default = true];
 
+  // ap_version: different ways of computing Average Precision.
+  //    Check https://sanchom.wordpress.com/tag/average-precision/ for details.
+  //    11point: the 11-point interpolated average precision. Used in VOC2007.
+  //    MaxIntegral: maximally interpolated AP. Used in VOC2012/ILSVRC.
+  //    Integral: the natural integral of the precision-recall curve.
+  optional string ap_version = 42 [default = "Integral"];
+  // If true, display per class result.
+  optional bool show_per_class_result = 43 [default = false];
+
+  // the stepsize for learning rate policy "plateau"
+  repeated int32 plateau_winsize = 44;
+
+  // Evaluation type.
+  optional string eval_type = 45 [default = "classification"];
+
   optional bool disabled_update = 46 [default = false];
   optional string engine = 47 [default = ""];
+
+  optional bool time_info = 99 [default = false];
 }
 
 // A message that stores the solver snapshots
