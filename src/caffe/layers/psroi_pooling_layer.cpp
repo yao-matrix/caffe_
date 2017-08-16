@@ -65,7 +65,7 @@ namespace caffe {
     PSROIPoolingParameter psroi_pooling_param =
       this->layer_param_.psroi_pooling_param();
     spatial_scale_ = psroi_pooling_param.spatial_scale();
-    LOG(ERROR) << "Spatial scale: " << spatial_scale_;
+    LOG(INFO) << "Spatial scale: " << spatial_scale_;
 
     CHECK_GT(psroi_pooling_param.output_dim(), 0)
       << "output_dim must be > 0";
@@ -113,7 +113,6 @@ namespace caffe {
 #endif
       for (int n = 0; n < num; ++n) {
         // per roi
-
         int roi_add = n * 5;
         // [start, end) interval for spatial sampling
         int roi_batch_ind = bottom_rois[roi_add];
@@ -268,7 +267,6 @@ namespace caffe {
   template <typename Dtype>
   void PSROIPoolingLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom) {
-
     if (!propagate_down[0]) {
       return;
     }

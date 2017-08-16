@@ -118,7 +118,7 @@ TYPED_TEST(ROIPoolingLayerTest, TestForward) {
   layer_2.Forward(this->blob_bottom_vec_2_, this->blob_top_vec_2_);
   for (int i = 0; i < this->blob_top_data_2_->count(); ++i) {
     EXPECT_EQ(this->blob_top_data_2_->cpu_data()[i],
-        this->blob_bottom_data_2_->cpu_data()[i+3*12*20]);
+        this->blob_bottom_data_2_->cpu_data()[i + 3 * 12 * 20]);
   }
 
   // 6 x 10 pooling with bin_size_h == 2 && bin_size_w == 2
@@ -134,12 +134,10 @@ TYPED_TEST(ROIPoolingLayerTest, TestForward) {
         Dtype maxval = -FLT_MAX;
         for (int h = 2 * ph; h < 2 * (ph + 1); ++h) {
           for (int w = 2 * pw; w < 2 * (pw + 1); ++w) {
-            maxval = std::max(maxval, this->blob_bottom_data_2_->cpu_data()[
-                ((n * 3 + c) * 12 + h) * 20 + w]);
+            maxval = std::max(maxval, this->blob_bottom_data_2_->cpu_data()[((n * 3 + c) * 12 + h) * 20 + w]);
           }
         }
-        EXPECT_EQ(this->blob_top_data_2_->cpu_data()[(c * 6 + ph) * 10 + pw],
-            maxval);
+        EXPECT_EQ(this->blob_top_data_2_->cpu_data()[(c * 6 + ph) * 10 + pw], maxval);
       }
     }
   }

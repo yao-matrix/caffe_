@@ -1604,12 +1604,6 @@ message PriorBoxParameter {
   optional float offset = 13 [default = 0.5];
 }
 
-message PSROIPoolingParameter {
-   required float spatial_scale = 1; 
-   required int32 output_dim = 2; // output channel number
-   required int32 group_size = 3; // number of groups to encode position-sensitive score maps
- }
-
 message PythonParameter {
   optional string module = 1;
   optional string layer = 2;
@@ -1762,9 +1756,18 @@ message ROIPoolingParameter {
   // dimensions in height and width or as Y, X pairs.
   optional uint32 pooled_h = 1 [default = 0]; // The pooled output height
   optional uint32 pooled_w = 2 [default = 0]; // The pooled output width
+
+  repeated uint32 pooled_size = 3; // pooled size for 3D blobs
+
   // Multiplicative spatial scale factor to translate ROI coords from their
   // input scale to the scale used when pooling
-  optional float spatial_scale = 3 [default = 1];
+  optional float spatial_scale = 4 [default = 1];
+}
+
+message PSROIPoolingParameter {
+  required float spatial_scale = 1;
+  required int32 output_dim = 2; // output channel number
+  required int32 group_size = 3; // number of groups to encode position-sensitive score maps
 }
 
 message ScaleParameter {
