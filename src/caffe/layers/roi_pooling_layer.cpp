@@ -128,16 +128,18 @@ void ROIPoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   const Dtype* bottom_rois = bottom[1]->cpu_data();
   // Number of ROIs
   int num_rois = bottom[1]->shape(0);
-  int roi_offset = bottom[1]->offset(1);
+
   int batch_size = bottom[0]->shape(0);
   size_t top_count = top[0]->count();
-  size_t top_offset = top[0]->offset(1);
+
   Dtype* top_data = top[0]->mutable_cpu_data();
   caffe_set(top_count, Dtype(-FLT_MAX), top_data);
   int* argmax_data = max_idx_.mutable_cpu_data();
   caffe_set(top_count, -1, argmax_data);
 
   if (num_spatial_axes_ == 2) {
+    int roi_offset = bottom[1]->offset(1);
+    size_t top_offset = top[0]->offset(1);
     // For each ROI R = [batch_index x1 y1 x2 y2]: max pool over R
 #ifdef _OPENMP
     #pragma omp parallel for
@@ -205,6 +207,14 @@ void ROIPoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       }
     }
   } else if (num_spatial_axes_ == 3) {
+    vector<int> roi_offset_vec(1, 0);
+    roi_offset_vec[0] = 1;
+    int roi_offset = bottom[1]->offset(roi_offset_vec);
+
+    vector<int> top_offset_vec(1, 0);
+    top_offset_vec[0] = 1;
+    size_t top_offset = top[0]->offset(top_offset_vec);
+
 #ifdef _OPENMP
     #pragma omp parallel for
 #endif
@@ -229,7 +239,9 @@ void ROIPoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       const Dtype bin_size_h = static_cast<Dtype>(roi_height) / static_cast<Dtype>(pooled_h_);
       const Dtype bin_size_w = static_cast<Dtype>(roi_width) / static_cast<Dtype>(pooled_w_);
 
-      const Dtype* batch_data = bottom_data + bottom[0]->offset(roi_batch_ind);
+      vector<int> roi_batch_ind_offset(1, 0);
+      roi_batch_ind_offset[0] = roi_batch_ind;
+      const Dtype* batch_data = bottom_data + bottom[0]->offset(roi_batch_ind_offset);
 
       for (int c = 0; c < channels_; ++c) {
         for (int pd = 0; pd < pooled_d_; ++pd) {
@@ -274,9 +286,11 @@ void ROIPoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 	}
 
         // Increment all data pointers by one channel
-        batch_data += bottom[0]->offset(0, 1);
-        cur_top += top[0]->offset(0, 1);
-        cur_argmax += max_idx_.offset(0, 1);
+        vector<int> offset_vec(2, 0);
+        offset_vec[1] = 1;
+        batch_data += bottom[0]->offset(offset_vec);
+        cur_top += top[0]->offset(offset_vec);
+        cur_argmax += max_idx_.offset(offset_vec);
       }
     }
   }
