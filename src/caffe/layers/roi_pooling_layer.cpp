@@ -303,7 +303,7 @@ void ROIPoolingLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       int roi_batch_ind = bottom_rois[roi_n * 5];
       // Accumulate gradients over each bin in this ROI
 #ifdef _OPENMP
-      #pragma omp parallel for collapse(3) schedule(static)
+      #pragma omp parallel for
 #endif
       for (int c = 0; c < channels_; ++c) {
         for (int ph = 0; ph < pooled_h_; ++ph) {
@@ -324,7 +324,7 @@ void ROIPoolingLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       int roi_batch_ind = bottom_rois[roi_n * 7];
       // Accumulate gradients over each bin in this ROI
 #ifdef _OPENMP
-    #pragma omp parallel for collapse(4) schedule(static)
+      #pragma omp parallel for
 #endif
       for (int c = 0; c < channels_; ++c) {
         for (int pd = 0; pd < pooled_d_; ++pd) {
