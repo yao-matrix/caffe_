@@ -6,7 +6,12 @@
  3. $unset MKLROOT
  4. $make -j \`nproc\`
  5. $make pycaffe
+ 6. $export LD_LIBRARY_PATH=<caffe_path>/external/mkldnn/install/lib/:$LD_LIBRARY_PATH
 ```
+
+## Verified OS
+ 1. Ubuntu
+ 2. CentOS
 
 ## How to run w/ best performance
  1. turn off hyper threading in your machine
@@ -21,6 +26,7 @@
     ```
  4. launch caffe train task
 
+
 ## Add-on Feature List (2D layout: (N, C, H, W); 3D layout: (N, C, D, H, W))
  - [x] 2D ROI Pooling Layer (OpenMP optimized, for fast r-cnn/faster r-cnn)
  - [x] 2D PS-ROI Pooling Layer (OpenMP optimized, for r-fcn)
@@ -29,8 +35,12 @@
  - [x] 3D Convolution (in Convolution layer, MKL-DNN primitives and openMP optimized)
  - [x] 3D Pooling (in Pooling layer, openMP optimized)
  - [x] 3D Batch Normalization (in BatchNorm layer, MKL2017 and openMP optimzied)
+ - [x] 3D ReLU
  - [x] 3D Permute (in Permute layer, for SSD)
- - [ ] 3D ROI Pooling
+ - [x] 3D ROI Pooling
+ - [x] 3D Smooth-L1 loss
+ - [x] 3D Smooth-L1 OHEM
+ - [x] 3D sigmoid cross entropy loss
 
 ## Call For Contributions
 - Anything helps this repo, including **discussion**, **testing**, **promotion** and of course **your awesome code**.
