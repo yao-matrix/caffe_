@@ -94,7 +94,7 @@ void SmoothL1LossLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom, c
     }
 
 #ifdef _OPENMP
-#pragma omp parallel for
+    #pragma omp parallel for
 #endif
     for (size_t i = 0; i < count; i++) {
         Dtype val = diff_.cpu_data()[i];
@@ -120,7 +120,7 @@ void SmoothL1LossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top, con
     size_t count = diff_.count();
 
 #ifdef _OPENMP
-#pragma omp parallel for
+    #pragma omp parallel for
 #endif
     for (size_t i = 0; i < count; i++) {
         // f'(x) = sigma * sigma * x         if |x| < 1 / sigma / sigma
@@ -136,7 +136,7 @@ void SmoothL1LossLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top, con
     }
 
 #ifdef _OPENMP
-#pragma omp parallel for
+    #pragma omp parallel for
 #endif
     for (int i = 0; i < 2; ++i) {
         if (propagate_down[i])  {

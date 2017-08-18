@@ -257,7 +257,7 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   // get cpu engine
   cpu_engine = new engine(engine::cpu, 0);
 
-  // clear temp memory & primitive
+  // clear internal memory & primitive
   conv_src_mem.clear();
   conv_weights_mem.clear();
   conv_bias_mem.clear();
@@ -516,7 +516,7 @@ void ConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
 
   if (reinitialize == true) {
     BaseConvolutionLayer<Dtype>::Reshape(bottom, top);
- 
+
     src_dims.clear();
     for (int i = 0; i < this->num_spatial_axes_ + 2; ++i) {
       src_dims.push_back(bottom_dims[i]);
