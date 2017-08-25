@@ -175,7 +175,7 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   #pragma omp parallel if (batch_size > 1)
   #pragma omp single nowait
 #endif
-  for (int item_id = 0; item_id < batch_size; ++item_id)  {
+  for (int item_id = 0; item_id < batch_size; ++item_id) {
     // get a blob
     timer.Start();
     CHECK_GT(lines_size, lines_id_);
@@ -185,8 +185,7 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     CHECK(cv_img.data) << "Could not load " << lines_[lines_id_].first;
     read_time += timer.MicroSeconds();
     timer.Start();
-// Apply transformations (mirror, crop...) to the image
-
+    // Apply transformations (mirror, crop...) to the image
     int offset = batch->data_.offset(item_id);
     this->transformed_data_.set_cpu_data(prefetch_data + offset);
     this->data_transformer_->Transform(cv_img, &(this->transformed_data_));
@@ -232,9 +231,6 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
   DLOG(INFO) << "Transform time: " << trans_time / 1000 << " ms.";
 }
-
-
-
 
 INSTANTIATE_CLASS(ImageDataLayer);
 REGISTER_LAYER_CLASS(ImageData);

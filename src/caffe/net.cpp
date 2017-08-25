@@ -1157,14 +1157,11 @@ Dtype Net<Dtype>::ForwardTo(int end) {
 
 template <typename Dtype>
 const vector<Blob<Dtype>*>& Net<Dtype>::Forward(Dtype* loss) {
-  // Timer timer;
-  // timer.Start();
   if (loss != NULL) {
     *loss = ForwardFromTo(0, layers_.size() - 1);
   } else {
     ForwardFromTo(0, layers_.size() - 1);
   }
-  // LOG(ERROR) << "Forward takes: " << timer.MicroSeconds() / 1000. << " ms";
   return net_output_blobs_;
 }
 

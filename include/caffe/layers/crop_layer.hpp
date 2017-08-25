@@ -78,13 +78,15 @@ class CropLayer : public Layer<Dtype> {
   virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
       const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
 
-  vector<int> offsets;
+  Blob<int> offsets;
+  Blob<int> src_strides_;
+  Blob<int> dest_strides_;
 
  private:
   template<bool is_forward>
   void crop_copy(const vector<Blob<Dtype>*>& bottom,
                const vector<Blob<Dtype>*>& top,
-               const vector<int>& offsets,
+               const int* offsets,
                const Dtype* src_data,
                Dtype* dest_data);
 

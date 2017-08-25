@@ -72,7 +72,7 @@ void SoftmaxLayer<Dtype>::Forward_cpu_fast_case(
   const Dtype *bottom_base = bottom[0]->cpu_data();
 
 #ifdef _OPENMP
-#pragma omp parallel for
+  #pragma omp parallel for
 #endif
   for (int i = 0; i < outer_num_; ++i) {
     const Dtype* bottom_data = bottom_base + i * dim;
@@ -153,7 +153,7 @@ void SoftmaxLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
                           top_data, sum_multiplier_.cpu_data(), 0., scale_data);
     // division
 #ifdef _OPENMP
-#pragma omp parallel for
+    #pragma omp parallel for
 #endif
     for (int j = 0; j < channels; j++) {
       caffe_div(inner_num_, top_data + j * inner_num_, scale_data,
@@ -177,7 +177,7 @@ void SoftmaxLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
   for (int i = 0; i < outer_num_; ++i) {
     // compute dot(top_diff, top_data) and subtract them from the bottom diff
 #ifdef _OPENMP
-#pragma omp parallel for
+    #pragma omp parallel for
 #endif
     for (int k = 0; k < inner_num_; ++k) {
       scale_data[k] = caffe_cpu_strided_dot<Dtype>(channels,

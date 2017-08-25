@@ -50,7 +50,7 @@ void ReLULayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   const int count = bottom[0]->count();
   Dtype negative_slope = this->layer_param_.relu_param().negative_slope();
 #ifdef _OPENMP
-#pragma omp parallel for
+  #pragma omp parallel for
 #endif
   for (int i = 0; i < count; ++i) {
     top_data[i] = std::max(bottom_data[i], Dtype(0))
@@ -69,7 +69,7 @@ void ReLULayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     const int count = bottom[0]->count();
     Dtype negative_slope = this->layer_param_.relu_param().negative_slope();
 #ifdef _OPENMP
-#pragma omp parallel for
+    #pragma omp parallel for
 #endif
     for (int i = 0; i < count; ++i) {
       bottom_diff[i] = top_diff[i] * ((bottom_data[i] > 0)

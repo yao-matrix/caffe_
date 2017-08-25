@@ -184,6 +184,13 @@ caffe::Phase get_phase_from_flags(caffe::Phase default_value) {
   return caffe::TRAIN;  // Avoid warning
 }
 
+// Parse stages from flags
+vector<string> get_stages_from_flags() {
+  vector<string> stages;
+  boost::split(stages, FLAGS_stage, boost::is_any_of(","));
+  return stages;
+}
+
 // caffe commands to call by
 //     caffe <command> <args>
 //
@@ -240,6 +247,7 @@ int train() {
   CHECK(!FLAGS_snapshot.size() || !FLAGS_weights.size())
       << "Give a snapshot to resume training or weights to finetune "
       "but not both.";
+  vector<string> stages = get_stages_from_flags();
 
   caffe::SolverParameter solver_param;
   if (!caffe::ReadProtoFromTextFile(FLAGS_solver, &solver_param)) {
@@ -264,6 +272,7 @@ int train() {
   // If the gpus flag is not provided, allow the mode and device to be set
   // in the solver prototxt.
   if (FLAGS_gpu.size() == 0
+      && solver_param.has_solver_mode()
       && solver_param.solver_mode() == caffe::SolverParameter_SolverMode_GPU) {
       if (solver_param.has_device_id()) {
           FLAGS_gpu = "" +
@@ -331,7 +340,6 @@ int train() {
     LOG(FATAL) << "Multi-GPU execution not available - rebuild with USE_NCCL";
 #endif
   } else {
-    LOG(INFO) << "Starting Optimization";
     solver->Solve();
   }
   LOG(INFO) << "Optimization Done.";
@@ -436,7 +444,7 @@ int test_detection(Net<float>& caffe_net) {
 int test() {
   CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition to score.";
   CHECK_GT(FLAGS_weights.size(), 0) << "Need model weights to score.";
-  vector<string> stages = get_stages_from_flags(FLAGS_stage);
+  vector<string> stages = get_stages_from_flags();
 
   // Set device id and mode
   vector<int> gpus;
@@ -515,7 +523,7 @@ RegisterBrewFunction(test);
 int time() {
   CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition to time.";
   caffe::Phase phase = get_phase_from_flags(caffe::TRAIN);
-  vector<string> stages = get_stages_from_flags(FLAGS_stage);
+  vector<string> stages = get_stages_from_flags();
 
   // Set device id and mode
   vector<int> gpus;
@@ -701,8 +709,7 @@ int main(int argc, char** argv) {
 #ifdef WITH_PYTHON_LAYER
     try {
 #endif
-      int ret = GetBrewFunction(caffe::string(argv[1]))();
-      return ret;
+      return GetBrewFunction(caffe::string(argv[1]))();
 #ifdef WITH_PYTHON_LAYER
     } catch (bp::error_already_set) {
       PyErr_Print();

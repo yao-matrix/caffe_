@@ -315,12 +315,12 @@ bp::object BlobVec_add_blob(bp::tuple args, bp::dict kwargs) {
 }
 
 template<typename Dtype>
-class PythonCallback: public Solver<Dtype>::Callback {
+class SolverCallback: public Solver<Dtype>::Callback {
  protected:
   bp::object on_start_, on_gradients_ready_;
 
  public:
-  PythonCallback(bp::object on_start, bp::object on_gradients_ready)
+  SolverCallback(bp::object on_start, bp::object on_gradients_ready)
     : on_start_(on_start), on_gradients_ready_(on_gradients_ready) { }
   virtual void on_gradients_ready() {
     on_gradients_ready_();
@@ -332,7 +332,7 @@ class PythonCallback: public Solver<Dtype>::Callback {
 template<typename Dtype>
 void Solver_add_callback(Solver<Dtype> * solver, bp::object on_start,
   bp::object on_gradients_ready) {
-  solver->add_callback(new PythonCallback<Dtype>(on_start, on_gradients_ready));
+  solver->add_callback(new SolverCallback<Dtype>(on_start, on_gradients_ready));
 }
 
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(SolveOverloads, Solve, 0, 1);

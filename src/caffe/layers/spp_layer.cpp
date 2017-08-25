@@ -55,6 +55,7 @@ SPPLayer<Dtype>::~SPPLayer() {
   std::for_each(split_top_vec_.begin(),split_top_vec_.end(), 
                                                 [](Blob<Dtype>* p){delete p;});
 }
+
 template <typename Dtype>
 LayerParameter SPPLayer<Dtype>::GetPoolingParam(const int pyramid_level,
       const int bottom_h, const int bottom_w, const SPPParameter spp_param) {

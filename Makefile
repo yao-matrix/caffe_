@@ -97,7 +97,7 @@ LIB_BUILD_DIR := $(BUILD_DIR)/lib
 STATIC_NAME := $(LIB_BUILD_DIR)/lib$(LIBRARY_NAME).a
 DYNAMIC_VERSION_MAJOR 		:= 1
 DYNAMIC_VERSION_MINOR 		:= 0
-DYNAMIC_VERSION_REVISION 	:= 0-rc3
+DYNAMIC_VERSION_REVISION 	:= 0
 DYNAMIC_NAME_SHORT := lib$(LIBRARY_NAME).so
 #DYNAMIC_SONAME_SHORT := $(DYNAMIC_NAME_SHORT).$(DYNAMIC_VERSION_MAJOR)
 DYNAMIC_VERSIONED_NAME_SHORT := $(DYNAMIC_NAME_SHORT).$(DYNAMIC_VERSION_MAJOR).$(DYNAMIC_VERSION_MINOR).$(DYNAMIC_VERSION_REVISION)
@@ -258,7 +258,7 @@ ifeq ($(USE_LMDB), 1)
 	LIBRARIES += lmdb
 endif
 ifeq ($(USE_OPENCV), 1)
-	LIBRARIES += opencv_core opencv_highgui opencv_imgproc 
+	LIBRARIES += opencv_core opencv_highgui opencv_imgproc
 
 	ifeq ($(OPENCV_VERSION), 3)
 		LIBRARIES += opencv_imgcodecs opencv_videoio
@@ -371,7 +371,7 @@ ifdef CUSTOM_CXX
 endif
 
 # Compiler flags
-ifneq (,$(findstring icpc,$(CXX)))
+ifneq (,$(findstring icpc, $(CXX)))
 	CXX_HARDENING_FLAGS += -fstack-protector
 else ifneq (,$(findstring clang++,$(CXX)))
 	CXX_HARDENING_FLAGS += -fPIE -fstack-protector
@@ -384,7 +384,7 @@ else ifneq (,$(findstring g++,$(CXX)))
 endif
 
 # Linker flags
-ifneq (,$(findstring clang++,$(CXX)))
+ifneq (,$(findstring clang++, $(CXX)))
 	# In Clang, -z flags are not compatible, they need to be passed to linker via -Wl.
 	LINKER_SHARED_HARDENING_FLAGS += -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now
 	LINKER_EXEC_HARDENING_FLAGS += -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now
@@ -436,6 +436,12 @@ endif
 ifeq ($(USE_CUDNN), 1)
 	LIBRARIES += cudnn
 	COMMON_FLAGS += -DUSE_CUDNN
+endif
+
+# NCCL acceleration configuration
+ifeq ($(USE_NCCL), 1)
+	LIBRARIES += nccl
+	COMMON_FLAGS += -DUSE_NCCL
 endif
 
 # configure IO libraries
@@ -521,7 +527,7 @@ else ifeq ($(BLAS), open)
 	LIBRARIES += openblas
 else
 	# ATLAS
-	ifeq ($(LINUX), 0)
+	ifeq ($(LINUX), 1)
 		ifeq ($(BLAS), atlas)
 			# Linux simply has cblas and atlas
 			LIBRARIES += cblas atlas
@@ -531,8 +537,11 @@ else
 		LIBRARIES += cblas
 		# 10.10 has accelerate while 10.9 has veclib
 		XCODE_CLT_VER := $(shell pkgutil --pkg-info=com.apple.pkg.CLTools_Executables | grep 'version' | sed 's/[^0-9]*\([0-9]\).*/\1/')
+		XCODE_CLT_GEQ_7 := $(shell [ $(XCODE_CLT_VER) -gt 6 ] && echo 1)
 		XCODE_CLT_GEQ_6 := $(shell [ $(XCODE_CLT_VER) -gt 5 ] && echo 1)
-		ifeq ($(XCODE_CLT_GEQ_6), 1)
+		ifeq ($(XCODE_CLT_GEQ_7), 1)
+			BLAS_INCLUDE ?= /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/$(shell ls /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/ | sort | tail -1)/System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/Headers
+		else ifeq ($(XCODE_CLT_GEQ_6), 1)
 			BLAS_INCLUDE ?= /System/Library/Frameworks/Accelerate.framework/Versions/Current/Frameworks/vecLib.framework/Headers/
 			LDFLAGS += -framework Accelerate
 		else

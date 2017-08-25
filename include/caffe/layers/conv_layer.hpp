@@ -176,7 +176,6 @@ class ConvolutionLayer : public BaseConvolutionLayer<Dtype> {
   void Backward_weights_3D(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top);
 };
 
-
 }  // namespace caffe
 
 #endif  // CAFFE_CONV_LAYER_HPP_

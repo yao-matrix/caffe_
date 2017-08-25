@@ -126,9 +126,9 @@ void SigmoidCrossEntropyLossLayer<Dtype>::Forward_cpu(
   const Dtype* target = bottom[1]->cpu_data();
   size_t valid_count = 0;
   Dtype loss = 0;
-#ifdef _OPENMP
+// #ifdef _OPENMP
   // #pragma omp parallel for reduction(+: loss) if(count > 1)
-#endif
+// #endif
   for (size_t i = 0; i < count; ++i) {
     const int target_value = static_cast<int>(target[i]);
     if (has_ignore_label_ && target_value == ignore_label_) {
@@ -173,7 +173,7 @@ void SigmoidCrossEntropyLossLayer<Dtype>::Backward_cpu(
 }
 
 #ifdef CPU_ONLY
-STUB_GPU_BACKWARD(SigmoidCrossEntropyLossLayer, Backward);
+STUB_GPU(SigmoidCrossEntropyLossLayer);
 #endif
 
 INSTANTIATE_CLASS(SigmoidCrossEntropyLossLayer);

@@ -10,14 +10,15 @@ endif()
 project(Caffe C CXX)
 
 # ---[ Caffe version
-set(CAFFE_TARGET_VERSION "1.0.0-rc3" CACHE STRING "Caffe logical version")
-set(CAFFE_TARGET_SOVERSION "1.0.0-rc3" CACHE STRING "Caffe soname version")
+set(CAFFE_TARGET_VERSION "1.0.0" CACHE STRING "Caffe logical version")
+set(CAFFE_TARGET_SOVERSION "1.0.0" CACHE STRING "Caffe soname version")
 add_definitions(-DCAFFE_VERSION=${CAFFE_TARGET_VERSION})
 
 # ---[ Using cmake scripts and modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
 include(ExternalProject)
+include(GNUInstallDirs)
 
 include(cmake/Utils.cmake)
 include(cmake/Targets.cmake)
@@ -27,10 +28,8 @@ include(cmake/ConfigGen.cmake)
 
 # ---[ Options
 caffe_option(CPU_ONLY  "Build Caffe without CUDA support" OFF) # TODO: rename to USE_CUDA
-caffe_option(USE_OPENMP "Build Caffe with OpenMP support" ON )
 caffe_option(USE_CUDNN "Build Caffe with cuDNN library support" ON IF NOT CPU_ONLY)
-caffe_option(USE_MKL2017_AS_DEFAULT_ENGINE "Use MKL2017 primitives for supported layers" OFF)
-caffe_option(USE_MKLDNN_AS_DEFAULT_ENGINE "Use MKL-DNN primitives for supported layers" OFF)
+caffe_option(USE_NCCL "Build Caffe with NCCL library support" OFF)
 caffe_option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 caffe_option(BUILD_python "Build Python wrapper" ON)
 set(python_version "2" CACHE STRING "Specify which Python version to use")
@@ -42,6 +41,9 @@ caffe_option(USE_LEVELDB "Build with levelDB" ON)
 caffe_option(USE_LMDB "Build with lmdb" ON)
 caffe_option(ALLOW_LMDB_NOLOCK "Allow MDB_NOLOCK when reading LMDB files (only if necessary)" OFF)
 caffe_option(USE_SYSTEMTAP "Build for SystemTap" OFF)
+caffe_option(USE_OPENMP "Build Caffe with OpenMP support" ON)
+caffe_option(USE_MKL2017_AS_DEFAULT_ENGINE "Use MKL2017 primitives for supported layers" OFF)
+caffe_option(USE_MKLDNN_AS_DEFAULT_ENGINE "Use MKL-DNN primitives for supported layers" OFF)
 caffe_option(PERFORMANCE_MONITORING "Build Caffe with PERFORMANCE_MONITORING " OFF)
 #caffe_option(USE_GITHUB_MKLDNN "Download and use MKL-DNN available on github" OFF)
  
@@ -131,6 +133,16 @@ if(BUILD_python)
   add_custom_target(pytest COMMAND python${python_version} -m unittest discover -s caffe/test WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/python )
   add_dependencies(pytest pycaffe)
 endif()
+
+# ---[ uninstall target
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Uninstall.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/Uninstall.cmake
+    IMMEDIATE @ONLY)
+
+add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P
+    ${CMAKE_CURRENT_BINARY_DIR}/cmake/Uninstall.cmake)
 
 # ---[ Configuration summary
 caffe_print_configuration_summary()

@@ -126,7 +126,6 @@ template <typename Dtype>
 Blob<Dtype>::Blob(const vector<int>& shape)
   // capacity_ must be initialized before calling Reshape
   : capacity_(0) {
-
   Reshape(shape);
 }
 

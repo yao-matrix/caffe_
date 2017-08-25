@@ -36,6 +36,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #ifdef USE_NCCL
+
 #include <cuda_runtime.h>
 #include <glog/logging.h>
 #include <stdio.h>

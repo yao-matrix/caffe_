@@ -178,7 +178,7 @@ class SyncedMemory {
   void to_gpu();
   void* cpu_ptr_;
   void* gpu_ptr_;
-  const size_t size_;
+  size_t size_;
   SyncedHead head_;
   bool own_cpu_data_;
   bool cpu_malloc_use_cuda_;

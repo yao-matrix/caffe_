@@ -150,7 +150,6 @@ protected:
         }
       }
     }
-
   virtual ~Layer() {}
 
   /**

@@ -47,6 +47,9 @@
 # PyCharm files
 .idea
 
+# Visual Studio Code files
+.vscode
+
 # OSX dir files
 .DS_Store
 
@@ -78,10 +81,10 @@ distribute/*
 python/caffe/proto/
 cmake_build
 .cmake_build
-nbproject/*
 
 # Generated documentation
 docs/_site
+docs/_includes
 docs/gathered
 _site
 doxygen
@@ -97,4 +100,5 @@ MANIFEST-*
 
 # Ignore MKL files (except prepare_mkl.sh)
 /external/mkl/*
+/external/mkldnn/*
 !/external/mkl/prepare_mkl.sh

@@ -1,14 +1,17 @@
-# This list is required for static linking and exported to CaffeConfig.cmake
+# These lists are later turned into target properties on main caffe library target
 set(Caffe_LINKER_LIBS "")
+set(Caffe_INCLUDE_DIRS "")
+set(Caffe_DEFINITIONS "")
+set(Caffe_COMPILE_OPTIONS "")
 
 # ---[ Boost
-find_package(Boost 1.46 REQUIRED COMPONENTS system thread filesystem regex)
-include_directories(SYSTEM ${Boost_INCLUDE_DIR})
-list(APPEND Caffe_LINKER_LIBS ${Boost_LIBRARIES})
+find_package(Boost 1.54 REQUIRED COMPONENTS system thread filesystem)
+list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${Boost_INCLUDE_DIRS})
+list(APPEND Caffe_LINKER_LIBS PUBLIC ${Boost_LIBRARIES})
 
 # ---[ Threads
 find_package(Threads REQUIRED)
-list(APPEND Caffe_LINKER_LIBS ${CMAKE_THREAD_LIBS_INIT})
+list(APPEND Caffe_LINKER_LIBS PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 
 # ---[ OpenMP
 if(USE_OPENMP)
@@ -27,46 +30,46 @@ endif()
 
 # ---[ Google-glog
 include("cmake/External/glog.cmake")
-include_directories(SYSTEM ${GLOG_INCLUDE_DIRS})
-list(APPEND Caffe_LINKER_LIBS ${GLOG_LIBRARIES})
+list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${GLOG_INCLUDE_DIRS})
+list(APPEND Caffe_LINKER_LIBS PUBLIC ${GLOG_LIBRARIES})
 
 # ---[ Google-gflags
 include("cmake/External/gflags.cmake")
-include_directories(SYSTEM ${GFLAGS_INCLUDE_DIRS})
-list(APPEND Caffe_LINKER_LIBS ${GFLAGS_LIBRARIES})
+list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${GFLAGS_INCLUDE_DIRS})
+list(APPEND Caffe_LINKER_LIBS PUBLIC ${GFLAGS_LIBRARIES})
 
 # ---[ Google-protobuf
 include(cmake/ProtoBuf.cmake)
 
 # ---[ HDF5
 find_package(HDF5 COMPONENTS HL REQUIRED)
-include_directories(SYSTEM ${HDF5_INCLUDE_DIRS} ${HDF5_HL_INCLUDE_DIR})
-list(APPEND Caffe_LINKER_LIBS ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
+list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${HDF5_INCLUDE_DIRS})
+list(APPEND Caffe_LINKER_LIBS PUBLIC ${HDF5_LIBRARIES} ${HDF5_HL_LIBRARIES})
 
 # ---[ LMDB
 if(USE_LMDB)
   find_package(LMDB REQUIRED)
-  include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
-  list(APPEND Caffe_LINKER_LIBS ${LMDB_LIBRARIES})
-  add_definitions(-DUSE_LMDB)
+  list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${LMDB_INCLUDE_DIR})
+  list(APPEND Caffe_LINKER_LIBS PUBLIC ${LMDB_LIBRARIES})
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DUSE_LMDB)
   if(ALLOW_LMDB_NOLOCK)
-    add_definitions(-DALLOW_LMDB_NOLOCK)
+    list(APPEND Caffe_DEFINITIONS PRIVATE -DALLOW_LMDB_NOLOCK)
   endif()
 endif()
 
 # ---[ LevelDB
 if(USE_LEVELDB)
   find_package(LevelDB REQUIRED)
-  include_directories(SYSTEM ${LevelDB_INCLUDE})
-  list(APPEND Caffe_LINKER_LIBS ${LevelDB_LIBRARIES})
-  add_definitions(-DUSE_LEVELDB)
+  list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${LevelDB_INCLUDES})
+  list(APPEND Caffe_LINKER_LIBS PUBLIC ${LevelDB_LIBRARIES})
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DUSE_LEVELDB)
 endif()
 
 # ---[ Snappy
 if(USE_LEVELDB)
   find_package(Snappy REQUIRED)
-  include_directories(SYSTEM ${Snappy_INCLUDE_DIR})
-  list(APPEND Caffe_LINKER_LIBS ${Snappy_LIBRARIES})
+  list(APPEND Caffe_INCLUDE_DIRS PRIVATE ${Snappy_INCLUDE_DIR})
+  list(APPEND Caffe_LINKER_LIBS PRIVATE ${Snappy_LIBRARIES})
 endif()
 
 # ---[ CUDA
@@ -78,8 +81,14 @@ if(NOT HAVE_CUDA)
     message(WARNING "-- CUDA is not detected by cmake. Building without it...")
   endif()
 
-  # TODO: remove this not cross platform define in future. Use caffe_config.h instead.
-  add_definitions(-DCPU_ONLY)
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DCPU_ONLY)
+endif()
+
+if(USE_NCCL)
+  find_package(NCCL REQUIRED)
+  include_directories(SYSTEM ${NCCL_INCLUDE_DIR})
+  list(APPEND Caffe_LINKER_LIBS ${NCCL_LIBRARIES})
+  add_definitions(-DUSE_NCCL)
 endif()
 
 # ---[ OpenCV
@@ -88,10 +97,10 @@ if(USE_OPENCV)
   if(NOT OpenCV_FOUND) # if not OpenCV 3.x, then imgcodecs are not found
     find_package(OpenCV REQUIRED COMPONENTS core highgui imgproc)
   endif()
-  include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
-  list(APPEND Caffe_LINKER_LIBS ${OpenCV_LIBS})
+  list(APPEND Caffe_INCLUDE_DIRS PUBLIC ${OpenCV_INCLUDE_DIRS})
+  list(APPEND Caffe_LINKER_LIBS PUBLIC ${OpenCV_LIBS})
   message(STATUS "OpenCV found (${OpenCV_CONFIG_PATH})")
-  add_definitions(-DUSE_OPENCV)
+  list(APPEND Caffe_DEFINITIONS PUBLIC -DUSE_OPENCV)
 endif()
 
 # ---[ MLSL
@@ -247,18 +256,18 @@ if(BUILD_python)
     find_package(NumPy 1.7.1)
     # Find the matching boost python implementation
     set(version ${PYTHONLIBS_VERSION_STRING})
-    
+
     STRING( REGEX REPLACE "[^0-9]" "" boost_py_version ${version} )
     find_package(Boost 1.46 COMPONENTS "python-py${boost_py_version}")
     set(Boost_PYTHON_FOUND ${Boost_PYTHON-PY${boost_py_version}_FOUND})
-    
+
     while(NOT "${version}" STREQUAL "" AND NOT Boost_PYTHON_FOUND)
       STRING( REGEX REPLACE "([0-9.]+).[0-9]+" "\\1" version ${version} )
-      
+
       STRING( REGEX REPLACE "[^0-9]" "" boost_py_version ${version} )
       find_package(Boost 1.46 COMPONENTS "python-py${boost_py_version}")
       set(Boost_PYTHON_FOUND ${Boost_PYTHON-PY${boost_py_version}_FOUND})
-      
+
       STRING( REGEX MATCHALL "([0-9.]+).[0-9]+" has_more_version ${version} )
       if("${has_more_version}" STREQUAL "")
         break()
@@ -277,9 +286,9 @@ if(BUILD_python)
   if(PYTHONLIBS_FOUND AND NUMPY_FOUND AND Boost_PYTHON_FOUND)
     set(HAVE_PYTHON TRUE)
     if(BUILD_python_layer)
-      add_definitions(-DWITH_PYTHON_LAYER)
-      include_directories(SYSTEM ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR} ${Boost_INCLUDE_DIRS})
-      list(APPEND Caffe_LINKER_LIBS ${PYTHON_LIBRARIES} ${Boost_LIBRARIES})
+      list(APPEND Caffe_DEFINITIONS PRIVATE -DWITH_PYTHON_LAYER)
+      list(APPEND Caffe_INCLUDE_DIRS PRIVATE ${PYTHON_INCLUDE_DIRS} ${NUMPY_INCLUDE_DIR} PUBLIC ${Boost_INCLUDE_DIRS})
+      list(APPEND Caffe_LINKER_LIBS PRIVATE ${PYTHON_LIBRARIES} PUBLIC ${Boost_LIBRARIES})
     endif()
   endif()
 endif()
