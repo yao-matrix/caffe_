@@ -335,6 +335,79 @@ void Solver_add_callback(Solver<Dtype> * solver, bp::object on_start,
   solver->add_callback(new SolverCallback<Dtype>(on_start, on_gradients_ready));
 }
 
+// Seems boost cannot call the base method directly
+void Solver_add_nccl(Solver<Dtype>* solver
+#ifdef USE_NCCL
+  , NCCL<Dtype>* nccl
+#endif
+) {
+#ifdef USE_NCCL
+  solver->add_callback(nccl);
+#endif
+}
+
+void share_weights(Solver<Dtype>* solver, Net<Dtype>* net) {
+  net->ShareTrainedLayersWith(solver->net().get());
+}
+
+template<typename Dtype>
+class NetCallback: public Net<Dtype>::Callback {
+ public:
+  explicit NetCallback(bp::object run) : run_(run) {}
+
+ protected:
+  virtual void run(int layer) {
+    run_(layer);
+  }
+  bp::object run_;
+};
+
+void Net_add_nccl(Net<Dtype>* net
+#ifdef USE_NCCL
+  , NCCL<Dtype>* nccl
+#endif
+) {
+#ifdef USE_NCCL
+  net->add_after_backward(nccl);
+#endif
+}
+#ifndef USE_NCCL
+template<typename Dtype>
+class NCCL {
+ public:
+  NCCL(shared_ptr<Solver<Dtype> > solver, const string& uid) {}
+};
+#endif
+
+bool HasNCCL() {
+#ifdef USE_NCCL
+  return true;
+#else
+  return false;
+#endif
+}
+
+#ifdef USE_NCCL
+bp::object NCCL_New_Uid() {
+  std::string uid = NCCL<Dtype>::new_uid();
+#if PY_MAJOR_VERSION >= 3
+  // Convert std::string to bytes so that Python does not
+  // try to decode the string using the current locale.
+
+  // Since boost 1.53 boost.python will convert str and bytes
+  // to std::string but will convert std::string to str. Here we
+  // force a bytes object to be returned. When this object
+  // is passed back to the NCCL constructor boost.python will
+  // correctly convert the bytes to std::string automatically
+  PyObject* py_uid = PyBytes_FromString(uid.c_str());
+  return bp::object(bp::handle<>(py_uid));
+#else
+  // automatic conversion is correct for python 2.
+  return bp::object(uid);
+#endif
+}
+#endif
+
 BOOST_PYTHON_MEMBER_FUNCTION_OVERLOADS(SolveOverloads, Solve, 0, 1);
 
 BOOST_PYTHON_MODULE(_caffe) {
@@ -348,6 +421,7 @@ BOOST_PYTHON_MODULE(_caffe) {
   bp::def("init_log", &InitLogLevel);
   bp::def("init_log", &InitLogLevelPipe);
   bp::def("log", &Log);
+  bp::def("has_nccl", &HasNCCL);
   bp::def("set_mode_cpu", &set_mode_cpu);
   bp::def("set_mode_gpu", &set_mode_gpu);
   bp::def("set_random_seed", &set_random_seed);
@@ -485,6 +559,24 @@ BOOST_PYTHON_MODULE(_caffe) {
     .def(bp::vector_indexing_suite<vector<shared_ptr<Net<Dtype> > >, true>());
   bp::class_<vector<bool> >("BoolVec")
     .def(bp::vector_indexing_suite<vector<bool> >());
+
+  bp::class_<NCCL<Dtype>, shared_ptr<NCCL<Dtype> >,
+    boost::noncopyable>("NCCL",
+                        bp::init<shared_ptr<Solver<Dtype> >, const string&>())
+#ifdef USE_NCCL
+    .def("new_uid", NCCL_New_Uid).staticmethod("new_uid")
+    .def("bcast", &NCCL<Dtype>::Broadcast)
+#endif
+    /* NOLINT_NEXT_LINE(whitespace/semicolon) */
+  ;
+  BP_REGISTER_SHARED_PTR_TO_PYTHON(NCCL<Dtype>);
+
+  bp::class_<Timer, shared_ptr<Timer>, boost::noncopyable>(
+    "Timer", bp::init<>())
+    .def("start", &Timer::Start)
+    .def("stop", &Timer::Stop)
+    .add_property("ms", &Timer::MilliSeconds);
+  BP_REGISTER_SHARED_PTR_TO_PYTHON(Timer);
 
   // boost python expects a void (missing) return value, while import_array
   // returns NULL for python3. import_array1() forces a void return value.
