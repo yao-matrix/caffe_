@@ -97,3 +97,10 @@ echo
 echo "-------------------GCC VERSION---------------------"
 GCC_VERSION=`gcc --version`
 echo $GCC_VERSION
+echo
+
+# check numpy version
+echo "--------------------NUMPY VERSION------------------"
+python -c "import numpy; print numpy.__version__"
+echo "--------------------NUMPY PATH------------------"
+python -c "import numpy; print numpy.__file__"
