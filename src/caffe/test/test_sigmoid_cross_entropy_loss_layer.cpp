@@ -153,7 +153,6 @@ TYPED_TEST(SigmoidCrossEntropyLossLayerTest, TestGradient) {
       this->blob_top_vec_, 0);
 }
 
-/*
 TYPED_TEST(SigmoidCrossEntropyLossLayerTest, TestIgnoreGradient) {
   typedef typename TypeParam::Dtype Dtype;
   FillerParameter data_filler_param;
@@ -181,7 +180,6 @@ TYPED_TEST(SigmoidCrossEntropyLossLayerTest, TestIgnoreGradient) {
     EXPECT_NE(diff[i + count / 2], 0.);
   }
 }
-*/
 
 
 }  // namespace caffe

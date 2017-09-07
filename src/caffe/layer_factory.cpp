@@ -639,11 +639,13 @@ shared_ptr<Layer<Dtype> > GetSigmoidLayer(const LayerParameter& param) {
   // New, more flexible way of providing engine
   if (engine == SigmoidParameter_Engine_DEFAULT && param.engine() != "") {
     EngineParser ep(param.engine());
-    if (ep.isEngine("CAFFE"))
+    if (ep.isEngine("CAFFE")) {
       engine = SigmoidParameter_Engine_CAFFE;
+    }
 #ifdef USE_CUDNN
-    else if (ep.isEngine("CUDNN"))
+    else if (ep.isEngine("CUDNN")) {
       engine = SigmoidParameter_Engine_CUDNN;
+    }
 #endif
   }
 
@@ -677,11 +679,13 @@ shared_ptr<Layer<Dtype> > GetSoftmaxLayer(const LayerParameter& param) {
   // New, more flexible way of providing engine
   if (engine == SoftmaxParameter_Engine_DEFAULT && param.engine() != "") {
     EngineParser ep(param.engine());
-    if (ep.isEngine("CAFFE"))
+    if (ep.isEngine("CAFFE")) {
       engine = SoftmaxParameter_Engine_CAFFE;
+    }
 #ifdef USE_CUDNN
-    if (ep.isEngine("CUDNN"))
+    if (ep.isEngine("CUDNN")) {
       engine = SoftmaxParameter_Engine_CUDNN;
+    }
 #endif
   }
 
@@ -715,11 +719,13 @@ shared_ptr<Layer<Dtype> > GetTanHLayer(const LayerParameter& param) {
   // New, more flexible way of providing engine
   if (engine == TanHParameter_Engine_DEFAULT && param.engine() != "") {
     EngineParser ep(param.engine());
-    if (ep.isEngine("CAFFE"))
+    if (ep.isEngine("CAFFE")) {
       engine = TanHParameter_Engine_CAFFE;
+    }
 #ifdef USE_CUDNN
-    if (ep.isEngine("CUDNN"))
+    if (ep.isEngine("CUDNN")) {
       engine = TanHParameter_Engine_CUDNN;
+    }
 #endif
   }
 

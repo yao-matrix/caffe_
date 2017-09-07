@@ -140,16 +140,8 @@ struct PrvMemDescr {
  */
 class SyncedMemory {
  public:
-  SyncedMemory()
-      : cpu_ptr_(NULL), gpu_ptr_(NULL),
-        size_(0), head_(UNINITIALIZED), own_cpu_data_(false),
-        cpu_malloc_use_cuda_(false), own_gpu_data_(false), own_prv_data_(false),
-        gpu_device_(-1) {}
-  explicit SyncedMemory(size_t size)
-      : cpu_ptr_(NULL), gpu_ptr_(NULL),
-        size_(size), head_(UNINITIALIZED), own_cpu_data_(false),
-        cpu_malloc_use_cuda_(false), own_gpu_data_(false), own_prv_data_(false),
-        gpu_device_(-1) {}
+  SyncedMemory();
+  explicit SyncedMemory(size_t size);
   ~SyncedMemory();
   const void* cpu_data();
   void set_cpu_data(void* data);
@@ -174,6 +166,8 @@ class SyncedMemory {
 #endif
 
  private:
+  void check_device();
+
   void to_cpu();
   void to_gpu();
   void* cpu_ptr_;
@@ -184,7 +178,7 @@ class SyncedMemory {
   bool cpu_malloc_use_cuda_;
   bool own_gpu_data_;
   bool own_prv_data_;
-  int gpu_device_;
+  int device_;
   boost::mutex mtx;
 
   DISABLE_COPY_AND_ASSIGN(SyncedMemory);

@@ -61,10 +61,10 @@ namespace caffe {
 template <typename Dtype>
 class Net {
  public:
-  explicit Net(const NetParameter& param, const Net* root_net = NULL);
+  explicit Net(const NetParameter& param);
   explicit Net(const string& param_file, Phase phase,
       const int level = 0, const vector<string>* stages = NULL,
-      const Net* root_net = NULL, std::string engine = "");
+      std::string engine = "");
   virtual ~Net() {}
 
   /// @brief Initialize a network with a NetParameter.
@@ -330,6 +330,31 @@ class Net {
   static bool StateMeetsRule(const NetState& state, const NetStateRule& rule,
       const string& layer_name);
 
+  // Invoked at specific points during an iteration
+  class Callback {
+   protected:
+    virtual void run(int layer) = 0;
+
+    template <typename T>
+    friend class Net;
+  };
+  const vector<Callback*>& before_forward() const { return before_forward_; }
+  void add_before_forward(Callback* value) {
+    before_forward_.push_back(value);
+  }
+  const vector<Callback*>& after_forward() const { return after_forward_; }
+  void add_after_forward(Callback* value) {
+    after_forward_.push_back(value);
+  }
+  const vector<Callback*>& before_backward() const { return before_backward_; }
+  void add_before_backward(Callback* value) {
+    before_backward_.push_back(value);
+  }
+  const vector<Callback*>& after_backward() const { return after_backward_; }
+  void add_after_backward(Callback* value) {
+    after_backward_.push_back(value);
+  }
+
  protected:
   // Helpers for Init.
   /// @brief Append a new top blob to the net.
@@ -412,7 +437,14 @@ class Net {
   size_t memory_used_;
   /// Whether to compute and display debug info for the net.
   bool debug_info_;
-  /// Whether to calculate each layer time cost
+
+  // Callbacks
+  vector<Callback*> before_forward_;
+  vector<Callback*> after_forward_;
+  vector<Callback*> before_backward_;
+  vector<Callback*> after_backward_;
+
+  // Whether to calculate each layer time cost
   bool time_info_;
   int iter_cnt;
   std::vector<double> forward_time_per_layer;
@@ -428,8 +460,6 @@ class Net {
   double backward_time;
   int FLAGS_iterations;
 
-  /// The root net that actually holds the shared layers in data parallelism
-  const Net* const root_net_;
   DISABLE_COPY_AND_ASSIGN(Net);
 };
 

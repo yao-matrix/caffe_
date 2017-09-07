@@ -173,7 +173,7 @@ void caffe_conv(const Blob<Dtype>* in, ConvolutionParameter* conv_param,
       }
     }
   }
-  //relu
+  // relu
   if (conv_param->relu()){
     for (int n = 0; n < out->shape(0); n++) {
       for (int o = 0; o < out->shape(1); o++) {

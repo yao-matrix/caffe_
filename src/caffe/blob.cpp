@@ -146,8 +146,15 @@ const Dtype* Blob<Dtype>::cpu_data() const {
 template <typename Dtype>
 void Blob<Dtype>::set_cpu_data(Dtype* data) {
   CHECK(data);
+  // Make sure CPU and GPU sizes remain equal
+  size_t size = count_ * sizeof(Dtype);
+  if (data_->size() != size) {
+    data_.reset(new SyncedMemory(size));
+    diff_.reset(new SyncedMemory(size));
+  }
   data_->set_cpu_data(data);
 }
+
 
 template <typename Dtype>
 void Blob<Dtype>::set_cpu_diff(Dtype* diff) {
@@ -338,10 +345,12 @@ Dtype Blob<Dtype>::asum_data() const {
   case SyncedMemory::SYNCED_PRV:
       {
         const Dtype* prv_ptr = prv_data();
-        if (prv_ptr == NULL)
+        if (prv_ptr == NULL) {
           return caffe_cpu_asum(count_, cpu_data());
-        else
+        }
+        else {
           return caffe_cpu_asum(prv_data_count(), prv_data());
+        }
       }
   case SyncedMemory::HEAD_AT_PRV:
     return caffe_cpu_asum(prv_data_count(), prv_data());

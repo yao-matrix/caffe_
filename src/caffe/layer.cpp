@@ -40,25 +40,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace caffe {
 
-template <typename Dtype>
-void Layer<Dtype>::InitMutex() {
-  forward_mutex_.reset(new boost::mutex());
-}
-
-template <typename Dtype>
-void Layer<Dtype>::Lock() {
-  if (IsShared()) {
-    forward_mutex_->lock();
-  }
-}
-
-template <typename Dtype>
-void Layer<Dtype>::Unlock() {
-  if (IsShared()) {
-    forward_mutex_->unlock();
-  }
-}
-
 #ifdef USE_MLSL
 template <typename Dtype>
 mn::Distribution & Layer<Dtype>::GetDistribution() {

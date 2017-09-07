@@ -299,8 +299,7 @@ void checkAllNans(const float *targetDataPointer, unsigned count,
 
 int collectAndCheckLayerData(bool collect_step,
   bool use_gpu, const char *output_dir) {
-    Net<float> caffe_net(FLAGS_model, caffe::TRAIN, FLAGS_level,
-      NULL, NULL, FLAGS_engine);
+    Net<float> caffe_net(FLAGS_model, caffe::TRAIN, FLAGS_level, NULL, FLAGS_engine);
     const vector<shared_ptr<Layer<float> > >& layers = caffe_net.layers();
     const vector<shared_ptr<Blob<float> > >& params = caffe_net.params();
     const vector<vector<Blob<float>*> >& bottom_vecs = caffe_net.bottom_vecs();

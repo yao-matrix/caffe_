@@ -463,8 +463,7 @@ int test() {
     Caffe::set_mode(Caffe::CPU);
   }
   // Instantiate the caffe net.
-  Net<float> caffe_net(FLAGS_model, caffe::TEST, FLAGS_level, &stages, NULL,
-                       FLAGS_engine);
+  Net<float> caffe_net(FLAGS_model, caffe::TEST, FLAGS_level, &stages, FLAGS_engine);
   caffe_net.CopyTrainedLayersFrom(FLAGS_weights);
   LOG(INFO) << "Running for " << FLAGS_iterations << " iterations.";
 
@@ -537,8 +536,7 @@ int time() {
     Caffe::set_mode(Caffe::CPU);
   }
   // Instantiate the caffe net.
-  Net<float> caffe_net(FLAGS_model, phase, FLAGS_level, &stages, NULL,
-                       FLAGS_engine);
+  Net<float> caffe_net(FLAGS_model, phase, FLAGS_level, &stages, FLAGS_engine);
 
   PERFORMANCE_INIT_MONITOR();
 

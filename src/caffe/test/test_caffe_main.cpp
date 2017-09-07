@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleMock(&argc, argv);
   caffe::GlobalInit(&argc, &argv);
 #ifndef CPU_ONLY
-  // Before starting testing, let's first print out a few cuda defice info.
+  // Before starting testing, let's first print out a few cuda device info.
   int device;
   cudaGetDeviceCount(&device);
   cout << "Cuda number of devices: " << device << endl;

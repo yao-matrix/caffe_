@@ -95,7 +95,7 @@ Classifier::Classifier(const string& model_file,
 #endif
 
   /* Load the network. */
-  net_.reset(new Net<float>(model_file, TEST, 0, NULL, NULL, engine));
+  net_.reset(new Net<float>(model_file, TEST, 0, NULL, engine));
   net_->CopyTrainedLayersFrom(trained_file);
 
   CHECK_EQ(net_->num_inputs(), 1) << "Network should have exactly one input.";

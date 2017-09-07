@@ -170,10 +170,10 @@ void SGDSolver<Dtype>::ClipGradients() {
 
 template <typename Dtype>
 void SGDSolver<Dtype>::ApplyUpdate() {
-  CHECK(Caffe::root_solver());
   Dtype rate = GetLearningRate();
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
-    LOG(ERROR) << "Iteration " << this->iter_ << ", lr = " << rate;
+    LOG_IF(ERROR, Caffe::root_solver()) << "Iteration " << this->iter_
+        << ", lr = " << rate;
   }
   ClipGradients();
   for (int param_id = 0; param_id < this->net_->learnable_params().size();
@@ -184,7 +184,6 @@ void SGDSolver<Dtype>::ApplyUpdate() {
 
 template <typename Dtype>
 void SGDSolver<Dtype>::ApplyUpdate(int param_id) {
-  CHECK(Caffe::root_solver());
   Dtype rate = GetLearningRate();
 
   LOG_PARAM_BLOB(this->net_->learnable_params()[param_id], diff, param_id, "ApplyUpdate: raw delwt:");
