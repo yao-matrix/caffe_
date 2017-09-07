@@ -73,9 +73,11 @@ template <typename Dtype>
 BasePrefetchingDataLayer<Dtype>::BasePrefetchingDataLayer(
     const LayerParameter& param)
     : BaseDataLayer<Dtype>(param),
-      prefetch_free_(), prefetch_full_() {
-  for (int i = 0; i < PREFETCH_COUNT; ++i) {
-    prefetch_free_.push(&prefetch_[i]);
+      prefetch_(param.data_param().prefetch()),
+      prefetch_free_(), prefetch_full_(), prefetch_current_() {
+  for (int i = 0; i < prefetch_.size(); ++i) {
+    prefetch_[i].reset(new Batch<Dtype>());
+    prefetch_free_.push(prefetch_[i].get());
   }
 }
 
@@ -83,22 +85,23 @@ template <typename Dtype>
 void BasePrefetchingDataLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
   BaseDataLayer<Dtype>::LayerSetUp(bottom, top);
+
   // Before starting the prefetch thread, we make cpu_data and gpu_data
   // calls so that the prefetch thread does not accidentally make simultaneous
   // cudaMalloc calls when the main thread is running. In some GPUs this
   // seems to cause failures if we do not so.
-  for (int i = 0; i < PREFETCH_COUNT; ++i) {
-    prefetch_[i].data_.mutable_cpu_data();
+  for (int i = 0; i < prefetch_.size(); ++i) {
+    prefetch_[i]->data_.mutable_cpu_data();
     if (this->output_labels_) {
-      prefetch_[i].label_.mutable_cpu_data();
+      prefetch_[i]->label_.mutable_cpu_data();
     }
   }
 #ifndef CPU_ONLY
   if (Caffe::mode() == Caffe::GPU) {
-    for (int i = 0; i < PREFETCH_COUNT; ++i) {
-      prefetch_[i].data_.mutable_gpu_data();
+    for (int i = 0; i < prefetch_.size(); ++i) {
+      prefetch_[i]->data_.mutable_gpu_data();
       if (this->output_labels_) {
-        prefetch_[i].label_.mutable_gpu_data();
+        prefetch_[i]->label_.mutable_gpu_data();
       }
     }
   }
@@ -130,6 +133,9 @@ void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
 #ifndef CPU_ONLY
       if (Caffe::mode() == Caffe::GPU) {
         batch->data_.data().get()->async_gpu_push(stream);
+        if (this->output_labels_) {
+          batch->label_.data().get()->async_gpu_push(stream);
+        }
         CUDA_CHECK(cudaStreamSynchronize(stream));
       }
 #endif

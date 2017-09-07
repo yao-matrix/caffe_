@@ -361,7 +361,6 @@ class NetCallback: public Net<Dtype>::Callback {
   }
   bp::object run_;
 };
-
 void Net_before_forward(Net<Dtype>* net, bp::object run) {
   net->add_before_forward(new NetCallback<Dtype>(run));
 }

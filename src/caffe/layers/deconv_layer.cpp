@@ -69,7 +69,7 @@ void DeconvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     const Dtype* bottom_data = bottom[i]->cpu_data();
     Dtype* top_data = top[i]->mutable_cpu_data();
 #ifdef _OPENMP
-    #pragma omp parallel if(this->num_of_threads_ > 1) num_threads(this->num_of_threads_)
+    #pragma omp parallel if (this->num_of_threads_ > 1) num_threads (this->num_of_threads_)
 #endif
     {
 #ifdef _OPENMP
@@ -110,7 +110,7 @@ void DeconvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
       if (this->num_of_threads_ > 1) {
         this->clear_weight_mt();
       }
-      #pragma omp parallel if(this->num_of_threads_ > 1) num_threads(this->num_of_threads_)
+      #pragma omp parallel if (this->num_of_threads_ > 1) num_threads (this->num_of_threads_)
 #endif
       {
 #ifdef _OPENMP

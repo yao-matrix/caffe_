@@ -110,7 +110,6 @@ class Solver {
   void Snapshot();
   virtual ~Solver() {}
   inline const SolverParameter& param() const { return param_; }
-  inline SolverParameter& param() { return param_; }
   inline shared_ptr<Net<Dtype> > net() { return net_; }
   inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
     return test_nets_;

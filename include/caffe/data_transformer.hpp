@@ -51,8 +51,6 @@ using google::protobuf::RepeatedPtrField;
 
 namespace caffe {
 
-class DataReader;
-
 class RandNumbers {
  public:
    /**
@@ -375,9 +373,6 @@ class DataTransformer {
   Phase phase_;
   Blob<Dtype> data_mean_;
   vector<Dtype> mean_values_;
-
-  // Data reader used if any to get data
-  DataReader* data_reader_used;
 
 
  private:

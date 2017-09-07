@@ -56,7 +56,10 @@ namespace caffe {
 template <typename Dtype>
 AnnotatedDataLayer<Dtype>::AnnotatedDataLayer(const LayerParameter& param)
   : BasePrefetchingDataLayer<Dtype>(param),
-    reader_(param) {
+    offset_() {
+  db_.reset(db::GetDB(param.data_param().backend()));
+  db_->Open(param.data_param().source(), db::READ);
+  cursor_.reset(db_->NewCursor());
 }
 
 template <typename Dtype>
@@ -87,7 +90,7 @@ void AnnotatedDataLayer<Dtype>::DataLayerSetUp(
 
   // Read a data point, and use it to initialize the top blob.
   AnnotatedDatum anno_datum;
-  anno_datum.ParseFromString(*(reader_.full().peek()));
+  anno_datum.ParseFromString(cursor_->value());
 
   // Use data_transformer to infer the expected blob shape from anno_datum.
   vector<int> top_shape =
@@ -96,10 +99,11 @@ void AnnotatedDataLayer<Dtype>::DataLayerSetUp(
   // Reshape top[0] and prefetch_data according to the batch_size.
   top_shape[0] = batch_size;
   top[0]->Reshape(top_shape);
-  for (int i = 0; i < this->PREFETCH_COUNT; ++i) {
-    this->prefetch_[i].data_.Reshape(top_shape);
+  for (int i = 0; i < this->prefetch_.size(); ++i) {
+    this->prefetch_[i]->data_.Reshape(top_shape);
   }
-  LOG(INFO) << "output data size: " << top[0]->num() << ","
+  LOG_IF(INFO, Caffe::root_solver())
+      << "output data size: " << top[0]->num() << ","
       << top[0]->channels() << "," << top[0]->height() << ","
       << top[0]->width();
   // label
@@ -141,14 +145,36 @@ void AnnotatedDataLayer<Dtype>::DataLayerSetUp(
       label_shape[0] = batch_size;
     }
     top[1]->Reshape(label_shape);
-    for (int i = 0; i < this->PREFETCH_COUNT; ++i) {
-      this->prefetch_[i].label_.Reshape(label_shape);
+    for (int i = 0; i < this->prefetch_.size(); ++i) {
+      this->prefetch_[i]->label_.Reshape(label_shape);
     }
   }
 }
 
+template <typename Dtype>
+bool AnnotatedDataLayer<Dtype>::Skip() {
+  int size = Caffe::solver_count();
+  int rank = Caffe::solver_rank();
+  bool keep = (offset_ % size) == rank ||
+              // In test mode, only rank 0 runs, so avoid skipping
+              this->layer_param_.phase() == TEST;
+  return !keep;
+}
+
+template<typename Dtype>
+void AnnotatedDataLayer<Dtype>::Next() {
+  cursor_->Next();
+  if (!cursor_->valid()) {
+    LOG_IF(INFO, Caffe::root_solver())
+        << "Restarting data prefetching from start.";
+    cursor_->SeekToFirst();
+  }
+  offset_++;
+}
+
+
 // This function is called on prefetch thread
-#ifdef _OPENMP
+#if 0
 template<typename Dtype>
 void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   CPUTimer batch_timer;
@@ -397,7 +423,7 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   const TransformationParameter& transform_param =
     this->layer_param_.transform_param();
   AnnotatedDatum anno_datum;
-  anno_datum.ParseFromString(*(reader_.full().peek()));
+  anno_datum.ParseFromString(cursor_->value());
   // Use data_transformer to infer the expected blob shape from anno_datum.
   vector<int> top_shape =
       this->data_transformer_->InferBlobShape(anno_datum.datum());
@@ -418,11 +444,13 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
 
   for (int item_id = 0; item_id < batch_size; ++item_id) {
     timer.Start();
+    while (Skip()) {
+      Next();
+    }
     // get a anno_datum
-    string* data = reader_.full().pop("Waiting for data");
+    string data = cursor_->value();
     AnnotatedDatum anno_datum;
-    anno_datum.ParseFromString(*data);
-    reader_.free().push(data);
+    anno_datum.ParseFromString(data);
     read_time += timer.MicroSeconds();
     timer.Start();
     AnnotatedDatum distort_datum;
@@ -573,6 +601,7 @@ void AnnotatedDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     } else {
       LOG(FATAL) << "Unknown annotation type.";
     }
+	Next();
   }
   timer.Stop();
   batch_timer.Stop();
