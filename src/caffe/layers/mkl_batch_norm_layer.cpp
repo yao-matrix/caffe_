@@ -149,7 +149,7 @@ void MKLBatchNormLayer<Dtype>::Init(const vector<Blob<Dtype>*>& bottom,
 
   this->blobs_.resize(3);
   if (use_weight_bias_) {
-    if ( bias_term_ ) {
+    if (bias_term_) {
         this->blobs_.resize(5);
     } else {
         this->blobs_.resize(4);

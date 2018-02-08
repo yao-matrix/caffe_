@@ -4,7 +4,7 @@ MKLDNN_TMPDIR := $(MKLDNN_ROOTDIR)/tmp
 MKLDNN_SRCDIR := $(MKLDNN_ROOTDIR)/src
 MKLDNN_BUILDDIR := $(MKLDNN_ROOTDIR)/build
 MKLDNN_INSTALLDIR := $(MKLDNN_ROOTDIR)/install
-MKLDNN_COMMIT := `cat ${CAFFE_ROOTDIR}/mkldnn.commit`
+# MKLDNN_COMMIT := `cat ${CAFFE_ROOTDIR}/mkldnn.commit`
 MKLDNN_CXX := $(CXX)
 MKLDNN_CC := $(CC)
 
@@ -28,7 +28,7 @@ ifeq ("$(wildcard $(MKLDNN_INSTALLDIR)/include/mkldnn.hpp)", "")
 mkldnn_download:
 	git clone --no-checkout $(MKLDNN_GITHUB) $(MKLDNN_TMPDIR)
 	rsync -a $(MKLDNN_TMPDIR)/ $(MKLDNN_SRCDIR) && rm -rf $(MKLDNN_TMPDIR)
-	cd $(MKLDNN_SRCDIR) && git reset --hard $(MKLDNN_COMMIT)
+	cd $(MKLDNN_SRCDIR) && git reset --hard HEAD
 
 mkldnn_build: mkldnn_download
 	cmake $(MKLDNN_CMAKE_FLAGS)
