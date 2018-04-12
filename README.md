@@ -14,6 +14,7 @@
  3. GCC: 4.8.5
 
 ## How to run w/ best performance
+### Options 1
  1. turn off hyper threading in your machine
  2. set environment variable to enable core affinity using:
     ```shell
@@ -25,7 +26,11 @@
       $ export MKL_NUM_THREADS=\`nproc\`
     ```
  4. launch caffe train task
-
+### Option 2
+  You can also run below command directly.
+```shell
+ $ taskset -c 0-<core_number> numactl -l <command_you_want_to_run>
+```
 
 ## Add-on Feature List (2D layout: (N, C, H, W); 3D layout: (N, C, D, H, W))
  - [x] 2D ROI Pooling Layer (OpenMP optimized, for fast r-cnn/faster r-cnn)
