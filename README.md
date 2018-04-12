@@ -22,8 +22,8 @@
     ```
  3. set OMP and MKL thread using number:
     ```shell
-      $ export OMP_NUM_THREADS=\`nproc\`
-      $ export MKL_NUM_THREADS=\`nproc\`
+      $ export OMP_NUM_THREADS=`nproc`
+      $ export MKL_NUM_THREADS=`nproc`
     ```
  4. launch caffe train task
 ### Option 2
