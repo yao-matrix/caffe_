@@ -4,7 +4,7 @@
  1. fill your project path to BLAS_INCLUDE, BLAS_LIB in Makefile.config to best leverage MKL
  2. $ make clean
  3. $ unset MKLROOT
- 4. $ make -j \`nproc\`
+ 4. $ make -j `nproc`
  5. $ make pycaffe
  6. $ export LD_LIBRARY_PATH=<caffe_path>/external/mkldnn/install/lib/:$LD_LIBRARY_PATH
 ```
