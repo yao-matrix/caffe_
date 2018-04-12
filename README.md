@@ -2,11 +2,11 @@
 ## How to build
 ```shell
  1. fill your project path to BLAS_INCLUDE, BLAS_LIB in Makefile.config to best leverage MKL
- 2. $make clean
- 3. $unset MKLROOT
- 4. $make -j \`nproc\`
- 5. $make pycaffe
- 6. $export LD_LIBRARY_PATH=<caffe_path>/external/mkldnn/install/lib/:$LD_LIBRARY_PATH
+ 2. $ make clean
+ 3. $ unset MKLROOT
+ 4. $ make -j \`nproc\`
+ 5. $ make pycaffe
+ 6. $ export LD_LIBRARY_PATH=<caffe_path>/external/mkldnn/install/lib/:$LD_LIBRARY_PATH
 ```
 ## Verified Environment
  1. Ubuntu 16.04
@@ -17,12 +17,12 @@
  1. turn off hyper threading in your machine
  2. set environment variable to enable core affinity using:
     ```shell
-      $export KMP_AFFINITY=compact,1,0,granularity=fine
+      $ export KMP_AFFINITY=compact,1,0,granularity=fine
     ```
  3. set OMP and MKL thread using number:
     ```shell
-      $export OMP_NUM_THREADS=\`nproc\`
-      $export MKL_NUM_THREADS=\`nproc\`
+      $ export OMP_NUM_THREADS=\`nproc\`
+      $ export MKL_NUM_THREADS=\`nproc\`
     ```
  4. launch caffe train task
 
