@@ -48,7 +48,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/common.hpp"
 #include "caffe/layer.hpp"
 #include "caffe/proto/caffe.pb.h"
+
 #include "caffe/util/benchmark.hpp"
+
 
 namespace caffe {
 
@@ -61,10 +63,10 @@ namespace caffe {
 template <typename Dtype>
 class Net {
  public:
-  explicit Net(const NetParameter& param);
+  explicit Net(const NetParameter& param, const Net* root_net = NULL);
   explicit Net(const string& param_file, Phase phase,
       const int level = 0, const vector<string>* stages = NULL,
-      std::string engine = "");
+      const Net* root_net = NULL, std::string engine = "");
   virtual ~Net() {}
 
   /// @brief Initialize a network with a NetParameter.
@@ -249,6 +251,11 @@ class Net {
   inline const vector<string>& param_display_names() const {
     return param_display_names_;
   }
+
+  inline const pair<int, int>& param_layer_indices(int param_id) {
+    return param_layer_indices_[param_id];
+  }
+
   /// @brief Input and output blob numbers
   inline int num_inputs() const { return net_input_blobs_.size(); }
   inline int num_outputs() const { return net_output_blobs_.size(); }
@@ -271,8 +278,6 @@ class Net {
 
   void set_debug_info(const bool value) { debug_info_ = value; }
 
-  void set_time_info(const bool value) { time_info_ = value; }
-
   // Helpers for Init.
   /**
    * @brief Remove layers that the user specified should be excluded given the current
@@ -294,9 +299,8 @@ class Net {
   *        then scale layer can be dropped
   */
   // TODO: Make it decent C++ anonymous function etc.
-  static void CompilationRuleOne(const NetParameter& param,
+  static void CompilationRuleRemoveScale(const NetParameter& param,
                                  NetParameter* param_compiled);
-  
   /**
   * @brief This is rule that analyze layer if it is of type MKLDNNReLU and if that is the case
   *        and previous layer which serves as input layer to MKLDNNReLU Layer is MKLDNNConvolution
@@ -304,7 +308,7 @@ class Net {
   */
 
 
-  static void CompilationRuleTwo(const NetParameter& param,
+  static void CompilationRuleConvReluFusion(const NetParameter& param,
                                  NetParameter* param_compiled);
 
   /**
@@ -312,9 +316,28 @@ class Net {
   *        and is to perform in place computation 
   *        if positive then make it doing out-ofplace computation
   */
-  static void CompilationRuleThree(const NetParameter& param,
+  static void CompilationRuleBNInplace(const NetParameter& param,
                              NetParameter* param_compiled);
 
+  /**
+  * @brief This is rule analyze for conv/elt/relu fusion.
+  */
+  static void CompilationRuleConvSumFusion(const NetParameter& param,
+                             NetParameter* param_compiled);
+
+   /**
+  * @brief This is rule analyze for general sparse.
+  */
+  static void CompilationRuleSparse(const NetParameter& param,
+                             NetParameter* param_compiled);
+
+  /**
+  * @brief This is rule that analyze layer if it is of type MKLDNNReLU and if that is the case
+  *        and previous layer which serves as input layer to MKLDNNReLU Layer is MKLDNNBN
+  *        then MKLDNNReLU layer can be dropped
+  */
+  static void CompilationRuleFuseBnRelu(const NetParameter& param,
+                                 NetParameter* param_compiled);
 
   /**
    * @brief If find "Conv--BN--Scale" in current network, merge BN and Scale layer into Convolution
@@ -326,34 +349,73 @@ class Net {
                                                 const NetParameter& param,
                                                 int layer_id);
 
+  static void GetNeedToCancelInplaceLayers(
+      vector<vector<const LayerParameter*>>& layer_pairs,    
+      std::map<string, int>& specified_layer_blob_name_to_index,      
+      std::map<string, int>& inplace_blob_name_to_index,
+      vector<string>& each_blob_list,
+      const NetParameter& param);
+
+  static void ParseNetInplaceStatus(
+      std::map<string, int>& inplace_blob_name_to_index,
+      std::map<string, int>& specified_layer_blob_name_to_index,      
+      vector<vector<string>>& specified_layer_input_blob_names,
+      NetParameter* param, const string& specified_layer_type);
+
   /// @brief return whether NetState state meets NetStateRule rule
   static bool StateMeetsRule(const NetState& state, const NetStateRule& rule,
       const string& layer_name);
+  /**
+   * @brief Look at the layer activations and parameters to find the maximum
+   * absolute values. The following layers are considered: Convolution,
+   * InnerProduct.
+   *
+   * @param layer_name The layers that should be quantized to fixed point.
+   * @param max_in The highest layer input.
+   * @param max_out The highest layer output.
+   * @param max_param The highest layer parameter.
+   *
+   * For layer parameters, the biases are ignored.
+   */
+  void RangeInLayers(vector<string>* layer_name, vector<Dtype>* max_in,
+      vector<Dtype>* max_out, vector<vector<Dtype>>* max_param, string scaling);
+  /**
+   * @brief Find the maximum value in a blob.
+   */
+  vector<Dtype> FindMax(Blob<Dtype>* blob, bool is_single=true);
+  inline const map<string,int>& blob_names_index() const {
+    return blob_names_index_;
+  }
 
-  // Invoked at specific points during an iteration
-  class Callback {
-   protected:
-    virtual void run(int layer) = 0;
+#ifdef CAFFE_PER_LAYER_TIMINGS
+  /* Timers for performance measurements */
+  Timer timer;
+  std::vector<double> forward_time_per_layer;
+  std::vector<double> backward_time_per_layer;
+  std::vector<double> update_time_per_layer;
+  double cleardiffs_time_per_iter;
 
-    template <typename T>
-    friend class Net;
-  };
-  const vector<Callback*>& before_forward() const { return before_forward_; }
-  void add_before_forward(Callback* value) {
-    before_forward_.push_back(value);
-  }
-  const vector<Callback*>& after_forward() const { return after_forward_; }
-  void add_after_forward(Callback* value) {
-    after_forward_.push_back(value);
-  }
-  const vector<Callback*>& before_backward() const { return before_backward_; }
-  void add_before_backward(Callback* value) {
-    before_backward_.push_back(value);
-  }
-  const vector<Callback*>& after_backward() const { return after_backward_; }
-  void add_after_backward(Callback* value) {
-    after_backward_.push_back(value);
-  }
+  std::vector<double> forward_time_per_layer_total;
+  std::vector<double> backward_time_per_layer_total;
+  std::vector<double> update_time_per_layer_total;
+  double cleardiffs_time_per_iter_total;
+
+  std::vector<double> forward_start_time_per_layer;
+  std::vector<double> backward_start_time_per_layer;
+  std::vector<double> update_start_time_per_layer;
+
+  std::vector<double> forward_stop_time_per_layer;
+  std::vector<double> backward_stop_time_per_layer;
+  std::vector<double> update_stop_time_per_layer;
+
+  void InitTimers();
+  void ResetTimers();
+  void PrintTimers(bool printTotal);
+
+  void PrintPayloadSize();
+  void SaveTimeline();
+
+#endif /* CAFFE_PER_LAYER_TIMINGS */
 
  protected:
   // Helpers for Init.
@@ -437,29 +499,8 @@ class Net {
   size_t memory_used_;
   /// Whether to compute and display debug info for the net.
   bool debug_info_;
-
-  // Callbacks
-  vector<Callback*> before_forward_;
-  vector<Callback*> after_forward_;
-  vector<Callback*> before_backward_;
-  vector<Callback*> after_backward_;
-
-  // Whether to calculate each layer time cost
-  bool time_info_;
-  int iter_cnt;
-  std::vector<double> forward_time_per_layer;
-  std::vector<double> backward_time_per_layer;
-
-  Timer forward_iter_timer;
-  Timer backward_iter_timer;
-  Timer total_timer;
-  Timer forward_timer;
-  Timer backward_timer;
-
-  double forward_time;
-  double backward_time;
-  int FLAGS_iterations;
-
+  /// The root net that actually holds the shared layers in data parallelism
+  const Net* const root_net_;
   DISABLE_COPY_AND_ASSIGN(Net);
 };
 

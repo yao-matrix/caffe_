@@ -48,7 +48,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/batch_norm_layer.hpp"
 #include "caffe/layers/concat_layer.hpp"
 #include "caffe/layers/conv_layer.hpp"
-#include "caffe/layers/deconv_layer.hpp"
 #include "caffe/layers/inner_product_layer.hpp"
 #include "caffe/layers/lrn_layer.hpp"
 #include "caffe/layers/pooling_layer.hpp"
@@ -56,6 +55,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/layers/sigmoid_layer.hpp"
 #include "caffe/layers/softmax_layer.hpp"
 #include "caffe/layers/tanh_layer.hpp"
+#include "caffe/layers/deconv_layer.hpp"
 #ifdef MKL2017_SUPPORTED
 #include "caffe/layers/mkl_layers.hpp"
 #endif
@@ -93,6 +93,7 @@ shared_ptr<Layer<Dtype> > GetConvolutionLayer(
   for (int i = 0; i < conv_param.dilation_size(); ++i) {
     if (conv_param.dilation(i) > 1) {
       use_dilation = true;
+      break;
     }
   }
 #endif
@@ -115,7 +116,7 @@ shared_ptr<Layer<Dtype> > GetConvolutionLayer(
     }
 #endif
 #ifdef MKLDNN_SUPPORTED
-    else if (!use_dilation && ep.isEngine("MKLDNN")) {
+    else if (ep.isEngine("MKLDNN")) {
       engine = ConvolutionParameter_Engine_MKLDNN;
     }
 #endif
@@ -129,7 +130,6 @@ shared_ptr<Layer<Dtype> > GetConvolutionLayer(
     }
 #endif
   }
-
   if (engine == ConvolutionParameter_Engine_CAFFE) {
     return shared_ptr<Layer<Dtype> >(new ConvolutionLayer<Dtype>(param));
 #ifdef USE_CUDNN
@@ -150,15 +150,10 @@ shared_ptr<Layer<Dtype> > GetConvolutionLayer(
 #endif
 #ifdef MKLDNN_SUPPORTED
   } else if (engine == ConvolutionParameter_Engine_MKLDNN) {
-    if (use_dilation) {
-      LOG(FATAL) << "MKLDNN doesn't support the dilated convolution at Layer "
-                 << param.name();
-    }
     return shared_ptr<Layer<Dtype> >(new MKLDNNConvolutionLayer<Dtype>(param));
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -327,7 +322,6 @@ shared_ptr<Layer<Dtype> > GetPoolingLayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -395,7 +389,6 @@ shared_ptr<Layer<Dtype> > GetLRNLayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -439,7 +432,6 @@ shared_ptr<Layer<Dtype> > GetBatchNormLayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -482,7 +474,6 @@ shared_ptr<Layer<Dtype> > GetSplitLayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -537,7 +528,6 @@ shared_ptr<Layer<Dtype> > GetReLULayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -623,7 +613,6 @@ shared_ptr<Layer<Dtype> > GetEltwiseLayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknow engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -664,7 +653,6 @@ shared_ptr<Layer<Dtype> > GetSigmoidLayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -704,7 +692,6 @@ shared_ptr<Layer<Dtype> > GetSoftmaxLayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }
@@ -744,7 +731,6 @@ shared_ptr<Layer<Dtype> > GetTanHLayer(const LayerParameter& param) {
 #endif
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
-    throw;  // Avoids missing return warning
   }
   return shared_ptr<Layer<Dtype> >();
 }

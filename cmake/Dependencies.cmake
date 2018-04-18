@@ -103,40 +103,6 @@ if(USE_OPENCV)
   list(APPEND Caffe_DEFINITIONS PUBLIC -DUSE_OPENCV)
 endif()
 
-# ---[ MLSL
-if(USE_MLSL)
-  #--find mlsl in external/mkl
-  set(script_cmd "./external/mlsl/prepare_mlsl.sh" )
-  execute_process(COMMAND ${script_cmd}
-	WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-	RESULT_VARIABLE script_result
-	OUTPUT_VARIABLE RETURN_STRING)
-  separate_arguments(RETURN_STRING)
-  list(GET RETURN_STRING 0 MLSL_ROOT_DIR)
-  list(GET RETURN_STRING 1 MLSL_LIBRARIES)
-  set(MLSL_ROOT "${MLSL_ROOT_DIR}")
-  #set(MLSL_ROOT "$ENV{MLSL_ROOT}")
-  if(NOT MLSL_ROOT)
-    message(FATAL_ERROR "Unable to find MLSL package installation directory!")
-  endif()
-  message(STATUS "Machine Learning Scaling Library (MLSL) found (${MLSL_ROOT}/intel64)")
-  add_definitions("-DUSE_MLSL=1")
-  include_directories(SYSTEM "${MLSL_ROOT}/intel64/include")
-  link_directories(SYSTEM "${MLSL_ROOT}/intel64/lib")
-  list(APPEND Caffe_LINKER_LIBS mlsl)
-
-  if(CAFFE_PER_LAYER_TIMINGS)
-    add_definitions("-DCAFFE_PER_LAYER_TIMINGS")
-  endif()
-  if(CAFFE_MLSL_SHUFFLE)
-    add_definitions("-DCAFFE_MLSL_SHUFFLE")
-  endif()
-  if(FW_OVERLAP_OPT)
-    message(STATUS "Forward overlapping optimization is enabled!")
-    add_definitions("-DFW_OVERLAP_OPT")
-  endif()
-endif()
-
 # ---[ BLAS
 set(MKL_EXTERNAL "0")
 if(NOT APPLE)

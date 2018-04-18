@@ -58,18 +58,7 @@ struct MKLMemoryDescriptorBase : PrvMemDescr,
     dnnLayoutDelete<Dtype>(layout_usr);
     dnnLayoutDelete<Dtype>(layout_int);
 
-#ifdef USE_MLSL
-    if (mn::is_multinode()) {
-      if (internal_ptr != NULL) {
-        mn::free((void*)internal_ptr);
-        internal_ptr = NULL;
-      }
-    } else {
-#endif /* !USE_MLSL */
-      dnnReleaseBuffer<Dtype>(internal_ptr);
-#ifdef USE_MLSL
-    }
-#endif /* USE_MLSL */
+    dnnReleaseBuffer<Dtype>(internal_ptr);
 
     dnnDelete<Dtype>(convert_to_int);
     dnnDelete<Dtype>(convert_from_int);
@@ -91,21 +80,11 @@ struct MKLMemoryDescriptorBase : PrvMemDescr,
   void allocate() {
     if (internal_ptr == NULL) {
 
-#ifdef USE_MLSL
-      if (mn::is_multinode()) {
-        internal_ptr = (Dtype*)mn::alloc(prv_size(), 64);
-        if (internal_ptr == NULL)
-          LOG(FATAL) << "internal_ptr is NULL after MLSL::Alloc";
-      } else {
-#endif /* !USE_MLSL */
-        int status = dnnAllocateBuffer<Dtype>(
+      int status = dnnAllocateBuffer<Dtype>(
           reinterpret_cast<void **>(&internal_ptr), layout_int);
-        CHECK_EQ(status, E_SUCCESS)
+      CHECK_EQ(status, E_SUCCESS)
           << "Failed internal_ptr memory allocation with status "
           << status << "\n";
-#ifdef USE_MLSL
-      }
-#endif /* USE_MLSL */
 
       caffe_set(prv_count(), Dtype(0), internal_ptr);
     }

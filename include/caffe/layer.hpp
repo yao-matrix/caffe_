@@ -48,8 +48,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/util/math_functions.hpp"
 
-#include "caffe/multinode/mlsl.hpp"
-
 #define MAX_ELEMS_TO_LOG 16
 #define LOG_LAYER(layer) DLOG(INFO) << layer->type() << ": "
 #define LOG_BLOB(layer, blob, part, blob_id, description)              \
@@ -115,22 +113,6 @@ namespace caffe {
 template <typename Dtype>
 class Layer {
 
-#ifdef USE_MLSL
-
-public:
-	MLSL::Operation *layerOp{ nullptr };
-  mn::Distribution &GetDistribution();
-  virtual bool ParamNeedReduce(int param_id) { return true; }
-
-protected:
-  virtual bool Bypass(const vector<Blob<Dtype>*>& bottom,
-                      const vector<Blob<Dtype>*>& top);
-
-  virtual void MultinodeSetUp(const vector<Blob<Dtype>*>& bottom,
-                              const vector<Blob<Dtype>*>& top);
-
-#endif /* USE_MLSL */
-
  public:
   /**
    * You should not implement your own constructor. Any set up code should go
@@ -138,7 +120,7 @@ protected:
    * layer.
    */
   explicit Layer(const LayerParameter& param)
-    : layer_param_(param) {
+    : layer_param_(param), is_shared_(false) {
       // Set phase and copy blobs (if there are any).
       phase_ = param.phase();
       // LOG(ERROR) << "layer " << layer_param_.name() << " construction with blobs size: " << layer_param_.blobs_size();
@@ -150,6 +132,7 @@ protected:
         }
       }
     }
+
   virtual ~Layer() {}
 
   /**
@@ -167,13 +150,11 @@ protected:
    */
   void SetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
+    InitMutex();
     CheckBlobCounts(bottom, top);
     LayerSetUp(bottom, top);
     Reshape(bottom, top);
     SetLossWeights(top);
-#ifdef USE_MLSL
-    MultinodeSetUp(bottom, top);
-#endif
   }
 
   /**
@@ -194,6 +175,30 @@ protected:
    */
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {}
+
+  /**
+   * @brief Whether a layer should be shared by multiple nets during data
+   *        parallelism. By default, all layers except for data layers should
+   *        not be shared. data layers should be shared to ensure each worker
+   *        solver access data sequentially during data parallelism.
+   */
+  virtual inline bool ShareInParallel() const { return false; }
+
+  /** @brief Return whether this layer is actually shared by other nets.
+   *         If ShareInParallel() is true and using more than one GPU and the
+   *         net has TRAIN phase, then this function is expected return true.
+   */
+  inline bool IsShared() const { return is_shared_; }
+
+  /** @brief Set whether this layer is actually shared by other nets
+   *         If ShareInParallel() is true and using more than one GPU and the
+   *         net has TRAIN phase, then is_shared should be set true.
+   */
+  inline void SetShared(bool is_shared) {
+    CHECK(ShareInParallel() || !is_shared)
+        << type() << "Layer does not support sharing.";
+    is_shared_ = is_shared;
+  }
 
   /**
    * @brief Adjust the shapes of top blobs and internal buffers to accommodate
@@ -518,6 +523,19 @@ protected:
   }
 
  private:
+  /** Whether this layer is actually shared by other nets*/
+  bool is_shared_;
+
+  /** The mutex for sequential forward if this layer is shared */
+  shared_ptr<boost::mutex> forward_mutex_;
+
+  /** Initialize forward_mutex_ */
+  void InitMutex();
+  /** Lock forward_mutex_ if this layer is shared */
+  void Lock();
+  /** Unlock forward_mutex_ if this layer is shared */
+  void Unlock();
+
   DISABLE_COPY_AND_ASSIGN(Layer);
 };  // class Layer
 
@@ -527,14 +545,10 @@ protected:
 template <typename Dtype>
 inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
+  // Lock during forward to ensure sequential forward
+  Lock();
   Dtype loss = 0;
   Reshape(bottom, top);
-#ifdef USE_MLSL
-  if (Bypass(bottom, top)) {
-    Unlock();
-    return loss;
-  }
-#endif
   switch (Caffe::mode()) {
   case Caffe::CPU:
     Forward_cpu(bottom, top);
@@ -568,6 +582,7 @@ inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
   default:
     LOG(FATAL) << "Unknown caffe mode.";
   }
+  Unlock();
   return loss;
 }
 
@@ -575,9 +590,6 @@ template <typename Dtype>
 inline void Layer<Dtype>::Backward(const vector<Blob<Dtype>*>& top,
     const vector<bool>& propagate_down,
     const vector<Blob<Dtype>*>& bottom) {
-#ifdef USE_MLSL
-  if (Bypass(bottom, top)) return;
-#endif
   switch (Caffe::mode()) {
   case Caffe::CPU:
     Backward_cpu(top, propagate_down, bottom);

@@ -1,40 +1,3 @@
-/*
-All modification made by Intel Corporation: © 2016 Intel Corporation
-
-All contributions by the University of California:
-Copyright (c) 2014, 2015, The Regents of the University of California (Regents)
-All rights reserved.
-
-All other contributions:
-Copyright (c) 2014, 2015, the respective contributors
-All rights reserved.
-For the list of contributors go to https://github.com/BVLC/caffe/blob/master/CONTRIBUTORS.md
-
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-    * Redistributions of source code must retain the above copyright notice,
-      this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * Neither the name of Intel Corporation nor the names of its contributors
-      may be used to endorse or promote products derived from this software
-      without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*/
-
 #include <functional>
 #include <utility>
 #include <vector>
@@ -89,8 +52,6 @@ void AccuracyLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   const Dtype* bottom_label = bottom[1]->cpu_data();
   const int dim = bottom[0]->count() / outer_num_;
   const int num_labels = bottom[0]->shape(label_axis_);
-  vector<Dtype> maxval(top_k_+1);
-  vector<int> max_id(top_k_+1);
   if (top.size() > 1) {
     caffe_set(nums_buffer_.count(), Dtype(0), nums_buffer_.mutable_cpu_data());
     caffe_set(top[1]->count(), Dtype(0), top[1]->mutable_cpu_data());
@@ -103,32 +64,29 @@ void AccuracyLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       if (has_ignore_label_ && label_value == ignore_label_) {
         continue;
       }
-      if (top.size() > 1) ++nums_buffer_.mutable_cpu_data()[label_value];
       DCHECK_GE(label_value, 0);
       DCHECK_LT(label_value, num_labels);
+      if (top.size() > 1) ++nums_buffer_.mutable_cpu_data()[label_value];
+      const Dtype prob_of_true_class = bottom_data[i * dim
+                                                   + label_value * inner_num_
+                                                   + j];
+      int num_better_predictions = -1;  // true_class also counts as "better"
       // Top-k accuracy
-      std::vector<std::pair<Dtype, int> > bottom_data_vector;
-      for (int k = 0; k < num_labels; ++k) {
-        bottom_data_vector.push_back(std::make_pair(
-            bottom_data[i * dim + k * inner_num_ + j], k));
+      for (int k = 0; k < num_labels && num_better_predictions < top_k_; ++k) {
+        num_better_predictions +=
+          (bottom_data[i * dim + k * inner_num_ + j] >= prob_of_true_class);
       }
-      std::partial_sort(
-          bottom_data_vector.begin(), bottom_data_vector.begin() + top_k_,
-          bottom_data_vector.end(), std::greater<std::pair<Dtype, int> >());
-      // check if true label is in top k predictions
-      for (int k = 0; k < top_k_; k++) {
-        if (bottom_data_vector[k].second == label_value) {
-          ++accuracy;
-          if (top.size() > 1) ++top[1]->mutable_cpu_data()[label_value];
-          break;
-        }
+      // check if there are less than top_k_ predictions
+      if (num_better_predictions < top_k_) {
+        ++accuracy;
+        if (top.size() > 1) ++top[1]->mutable_cpu_data()[label_value];
       }
       ++count;
     }
   }
 
   // LOG(INFO) << "Accuracy: " << accuracy;
-  top[0]->mutable_cpu_data()[0] = accuracy / count;
+  top[0]->mutable_cpu_data()[0] = (count == 0) ? 0 : (accuracy / count);
   if (top.size() > 1) {
     for (int i = 0; i < top[1]->count(); ++i) {
       top[1]->mutable_cpu_data()[i] =
@@ -138,6 +96,10 @@ void AccuracyLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   }
   // Accuracy layer should not be used as a loss function.
 }
+
+#ifdef CPU_ONLY
+STUB_GPU(AccuracyLayer);
+#endif
 
 INSTANTIATE_CLASS(AccuracyLayer);
 REGISTER_LAYER_CLASS(Accuracy);

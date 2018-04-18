@@ -77,10 +77,8 @@ void CropLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   const int start_axis = bottom[0]->CanonicalAxisIndex(param.axis());
 
   // Initialize offsets to 0 and the new shape to the current shape of the data.
+  offsets = vector<int>(input_dim, 0);
   vector<int> new_shape(bottom[0]->shape());
-  vector<int> offsets_shape(1, input_dim);
-  offsets.Reshape(offsets_shape);
-  int* offset_data = offsets.mutable_cpu_data();
 
   // Determine crop offsets and the new shape post-crop.
   for (int i = 0; i < input_dim; ++i) {
@@ -102,23 +100,16 @@ void CropLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
           << "size " << bottom[1]->shape(i) << " and offset " << crop_offset;
     }
     new_shape[i] = new_size;
-    offset_data[i] = crop_offset;
+    offsets[i] = crop_offset;
   }
   top[0]->Reshape(new_shape);
-  // Compute strides
-  src_strides_.Reshape(offsets_shape);
-  dest_strides_.Reshape(offsets_shape);
-  for (int i = 0; i < input_dim; ++i) {
-    src_strides_.mutable_cpu_data()[i] = bottom[0]->count(i + 1, input_dim);
-    dest_strides_.mutable_cpu_data()[i] = top[0]->count(i + 1, input_dim);
-  }
 }
 
 template <typename Dtype>
 template <bool is_forward>
 void CropLayer<Dtype>::crop_copy(const vector<Blob<Dtype>*>& bottom,
              const vector<Blob<Dtype>*>& top,
-             const int* offsets,
+             const vector<int>& offsets,
              const Dtype* src_data,
              Dtype* dest_data) {
   int last_dim = top[0]->num_axes() - 1;
@@ -160,7 +151,7 @@ void CropLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
   const Dtype* bottom_data = bottom[0]->cpu_data();
   Dtype* top_data = top[0]->mutable_cpu_data();
-  crop_copy<true>(bottom, top, offsets.cpu_data(), bottom_data, top_data);
+  crop_copy<true>(bottom, top, offsets, bottom_data, top_data);
 }
 
 template <typename Dtype>
@@ -171,7 +162,7 @@ void CropLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
 
   if (propagate_down[0]) {
     caffe_set(bottom[0]->count(), static_cast<Dtype>(0), bottom_diff);
-    crop_copy<false>(bottom, top, offsets.cpu_data(), top_diff, bottom_diff);
+    crop_copy<false>(bottom, top, offsets, top_diff, bottom_diff);
   }
 }
 

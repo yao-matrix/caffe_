@@ -78,6 +78,10 @@ template <typename Dtype>
 void MKLDNNEltwiseLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top)
 {
     VLOG(1) << "MKLDNNEltwiseLayer<Dtype>::Reshape: " << this->layer_param_.name();
+    this->reshape = (this->width_ == bottom[0]->width() &&
+                     this->height_ == bottom[0]->height() &&
+                     this->channels_ == bottom[0]->channels() &&
+                     this->num_ == bottom[0]->num()) ? false : true;
 
     this->width_ = bottom[0]->width();
     this->height_ = bottom[0]->height();
@@ -124,16 +128,16 @@ template <typename Dtype>
 void MKLDNNEltwiseLayer<Dtype>::InitEltwiseFwd(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top)
 {
     if (std::is_same<Dtype, double>::value) NOT_IMPLEMENTED;
-
+    
     int32_t n  = this->num_;
     int32_t iw = this->width_;
     int32_t ih = this->height_;
     int32_t ic = this->channels_;
 
     // If we just do simple adding, scale is 1.0 for all inputs we have
-    std::vector<double> scale(num_bottoms_, 1.0);
+    std::vector<float> scale(num_bottoms_, 1.0);
     //Eltwise layer is supporting multiplication coefficient and this scale value can be used for that.
-    for (int i = 0; i < num_bottoms_; ++i)
+    for (int i = 0; i < num_bottoms_; ++i) 
     {
         scale[i] = coeffs_[i];
     }
@@ -143,10 +147,11 @@ void MKLDNNEltwiseLayer<Dtype>::InitEltwiseFwd(const vector<Blob<Dtype>*>& botto
     memory::format mfmt_nchw = memory::format::nchw;
 
     // ---- Initialize memory descriptors -------------
-    shared_ptr<memory::desc> bottom_data_md, top_data_md;
-
     std::vector<memory::primitive_desc> bottom_data_mpd;
-    for (auto i = 0; i < num_bottoms_; i++)
+    fwd_bottom_data.clear();
+    fwd_bottom_data_primitives_.clear();
+    fwd_bottom_data_primitives_at_.clear();
+    for (auto i = 0; i < num_bottoms_; i++) 
     {
         fwd_bottom_data.push_back(boost::shared_ptr<MKLDNNData<Dtype> >());
         memory::format bottom_data_mfmt = mfmt_nchw;
@@ -161,21 +166,15 @@ void MKLDNNEltwiseLayer<Dtype>::InitEltwiseFwd(const vector<Blob<Dtype>*>& botto
                 = get_mkldnn_prv_descriptor<Dtype, false>(bottom[i]);
             bottom_data_mfmt = static_cast<memory::format>(
                 mem_descr->prv_memory_pd()->desc().data.format);
-            bottom_data_md.reset(new memory::desc(mem_descr->prv_memory_pd()->desc()));
             prv_bottom_data_mpd.reset(new memory::primitive_desc(
                 {{n, ic, ih, iw}, mpcsn, bottom_data_mfmt}, cpu_engine));
         }
-        else
-        {
-            bottom_data_md.reset(new memory::desc({{n, ic, ih, iw}}, mpcsn, bottom_data_mfmt));
-        }
-        top_data_md = bottom_data_md;
 
         bottom_data_mpd.push_back(memory::primitive_desc(
             {{n, ic, ih, iw}, mpcsn, bottom_data_mfmt}, cpu_engine));
 
         fwd_bottom_data[i].reset(new MKLDNNData<Dtype>(
-            usr_bottom_data_mpd, prv_bottom_data_mpd, bottom[i], this));
+            usr_bottom_data_mpd, prv_bottom_data_mpd, bottom[i], this));        
         fwd_bottom_data[i]->name = "fwd_bottom_data[i]   @ " + this->layer_param_.name();
         fwd_bottom_data_primitives_.push_back(fwd_bottom_data[i]->create_input(false));
         fwd_bottom_data_primitives_at_.push_back(*fwd_bottom_data_primitives_[i]);
@@ -183,7 +182,7 @@ void MKLDNNEltwiseLayer<Dtype>::InitEltwiseFwd(const vector<Blob<Dtype>*>& botto
 
     shared_ptr<memory::primitive_desc> usr_top_data_mpd(new memory::primitive_desc(
         {{n, ic, ih, iw}, mpcsn, mfmt_nchw}, cpu_engine));
-
+    
     // ---- Determining engine to use -----------------------
     std::string subengines = this->layer_param_.engine();
     if (subengines == "" || subengines == "MKLDNN")
@@ -198,7 +197,7 @@ void MKLDNNEltwiseLayer<Dtype>::InitEltwiseFwd(const vector<Blob<Dtype>*>& botto
     fwd_top_data_memory = fwd_top_data->create_output_memory();
 
     eltwiseFwd.reset(new sum(*eltwiseFwd_pd, fwd_bottom_data_primitives_at_, *fwd_top_data_memory));
-
+    
     for (auto i = 0; i < num_bottoms_; i++)
     {
         //fwd_bottom_data[i]->set_mkldnn_primitive(eltwiseFwd);   //Wrong passed primitive! (TODO: Checking!)
@@ -216,7 +215,7 @@ void MKLDNNEltwiseLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom, 
 {
     VLOG(1) << "MKLDNNEltwiseLayer<Dtype>::Forward_cpu: " << this->layer_param_.name();
 
-    if(eltwiseFwd_pd == NULL)
+    if(eltwiseFwd_pd == NULL || this->reshape)
         InitEltwiseFwd(bottom, top);
     for (auto i = 0; i < num_bottoms_; i++)
     {

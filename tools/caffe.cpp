@@ -58,9 +58,6 @@ namespace bp = boost::python;
 
 #include "caffe/util/bbox_util.hpp"
 
-#ifdef USE_MLSL
-#include "caffe/multinode/MlslSync.hpp"
-#endif /* USE_MLSL */
 
 using caffe::Blob;
 using caffe::Caffe;
@@ -272,7 +269,6 @@ int train() {
   // If the gpus flag is not provided, allow the mode and device to be set
   // in the solver prototxt.
   if (FLAGS_gpu.size() == 0
-      && solver_param.has_solver_mode()
       && solver_param.solver_mode() == caffe::SolverParameter_SolverMode_GPU) {
       if (solver_param.has_device_id()) {
           FLAGS_gpu = "" +
@@ -323,14 +319,6 @@ int train() {
   }
 
   LOG(INFO) << "Starting Optimization";
-#ifdef USE_MLSL
-  if (MLSL::GetNumNodes() > 1) {
-    LOG(INFO) << "Configuring multinode setup";
-    caffe::MlslSync<float> sync(solver);
-    LOG(INFO) << "Starting Multi-node Optimization in MLSL environment";
-    sync.run();
-  } else
-#endif /* USE_MLSL */
 
   if (gpus.size() > 1) {
 #ifdef USE_NCCL
@@ -463,7 +451,7 @@ int test() {
     Caffe::set_mode(Caffe::CPU);
   }
   // Instantiate the caffe net.
-  Net<float> caffe_net(FLAGS_model, caffe::TEST, FLAGS_level, &stages, FLAGS_engine);
+  Net<float> caffe_net(FLAGS_model, caffe::TEST, FLAGS_level, &stages, NULL, FLAGS_engine);
   caffe_net.CopyTrainedLayersFrom(FLAGS_weights);
   LOG(INFO) << "Running for " << FLAGS_iterations << " iterations.";
 
@@ -536,7 +524,7 @@ int time() {
     Caffe::set_mode(Caffe::CPU);
   }
   // Instantiate the caffe net.
-  Net<float> caffe_net(FLAGS_model, phase, FLAGS_level, &stages, FLAGS_engine);
+  Net<float> caffe_net(FLAGS_model, phase, FLAGS_level, &stages, NULL, FLAGS_engine);
 
   PERFORMANCE_INIT_MONITOR();
 
@@ -558,6 +546,26 @@ int time() {
   const vector<vector<Blob<float>*> >& top_vecs = caffe_net.top_vecs();
   const vector<vector<bool> >& bottom_need_backward =
       caffe_net.bottom_need_backward();
+
+  // Warm up 5 iterations here, because the first several iteration times
+  // have huge variance in some machines.
+  int warmup_iterations = 5;
+  for (int j = 0; j < warmup_iterations; ++j) {
+    if (j == warmup_iterations - 1)
+      PERFORMANCE_START_RESETTING_MONITOR();
+    for (int i = 0; i < layers.size(); ++i) {
+      layers[i]->Forward(bottom_vecs[i], top_vecs[i]);
+    }
+    if (!FLAGS_forward_only) {
+      for (int i = layers.size() - 1; i >= 0; --i) {
+        layers[i]->Backward(top_vecs[i], bottom_need_backward[i],
+                            bottom_vecs[i]);
+      }
+    }
+  }
+
+  PERFORMANCE_STOP_RESETTING_MONITOR();
+
   LOG(INFO) << "*** Benchmark begins ***";
   LOG(INFO) << "Testing for " << FLAGS_iterations << " iterations.";
   Timer total_timer;
@@ -707,7 +715,8 @@ int main(int argc, char** argv) {
 #ifdef WITH_PYTHON_LAYER
     try {
 #endif
-      return GetBrewFunction(caffe::string(argv[1]))();
+      int ret = GetBrewFunction(caffe::string(argv[1]))();
+      return ret;
 #ifdef WITH_PYTHON_LAYER
     } catch (bp::error_already_set) {
       PyErr_Print();

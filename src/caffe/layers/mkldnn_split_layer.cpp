@@ -66,12 +66,22 @@ void MKLDNNSplitLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
     CHECK_EQ(count, top[i]->count());
   }
   size_t dim_src = bottom[0]->shape().size();
-  this->sizes_src_.resize(dim_src);
-  this->strides_src_.resize(dim_src);
+  this->reshape = false;
+  if (this->sizes_src_.size() != dim_src || this->strides_src_.size() != dim_src) {
+    this->sizes_src_.resize(dim_src);
+    this->strides_src_.resize(dim_src);
+    this->reshape = true;
+  }
   for (size_t d = 0; d < dim_src; ++d) {
-    this->sizes_src_[d] = bottom[0]->shape()[d];
-    this->strides_src_[d] = (d == 0) ?
-                1 : this->strides_src_[d-1]*this->sizes_src_[d-1];
+    if (this->sizes_src_[d] != bottom[0]->shape()[d]) {
+      this->sizes_src_[d] = bottom[0]->shape()[d];
+      this->reshape = true;
+    }
+    size_t stride = (d == 0) ? 1 : this->strides_src_[d-1]*this->sizes_src_[d-1];
+    if (this->strides_src_[d] != stride) {
+      this->strides_src_[d] = stride;
+      this->reshape = true;
+    }
   }
 
   // TODO: Add checking to reinitialize Backward, to be
@@ -84,7 +94,7 @@ void MKLDNNSplitLayer<Dtype>::InitSplitBwd(const vector<Blob<Dtype>*>& bottom,
   if (std::is_same<Dtype, double>::value)  NOT_IMPLEMENTED;
 
   // We just do simple adding so scale is 1.0 for all inputs we have
-  std::vector<double> scale(top.size(), 1.0);
+  std::vector<float> scale(top.size(), 1.0);
   engine cpu_engine = CpuEngine::Instance().get_engine();
   memory::data_type data_type = memory::data_type::f32;
   // TODO: shouldn't we have format here that is well suited for earlier layer.
@@ -94,10 +104,15 @@ void MKLDNNSplitLayer<Dtype>::InitSplitBwd(const vector<Blob<Dtype>*>& bottom,
 
   // Dimensions of bottom and top blobs. There is a number of
   // top blobs each of the same size as the bottom one
-  memory::dims bottom_tz = {static_cast<int>(this->sizes_src_[0]),
-                            static_cast<int>(this->sizes_src_[1]),
-                            static_cast<int>(this->sizes_src_[2]),
-                            static_cast<int>(this->sizes_src_[3])};
+  memory::dims bottom_tz;
+  bottom_tz.resize(4);
+  for(int i=0; i<4; i++) {
+    if(i < this->sizes_src_.size()) {
+      bottom_tz[i] = static_cast<int>(this->sizes_src_[i]);
+    } else {
+      bottom_tz[i] = 1;
+    }
+  }
 
   shared_ptr<memory::primitive_desc> prv_diff_dst_mpd;
   shared_ptr<memory::primitive_desc> usr_diff_dst_mpd(
@@ -128,6 +143,9 @@ void MKLDNNSplitLayer<Dtype>::InitSplitBwd(const vector<Blob<Dtype>*>& bottom,
   // Gather diff descriptors of top difs (inputs for BW)
   std::vector<memory::primitive_desc> prv_diff_srcs_mpd;
   boost::shared_ptr<memory::primitive_desc> mpd_ptr;
+  bwd_top_diffs_.clear();
+  bwd_top_diff_primitives_.clear();
+  bwd_top_diffs_primitives_at_.clear();
   for (int i = 0; i < top.size(); ++i) {
     // If diff is in private layout then copy descriptor from it
     memory::format diff_src_mfmt = mfmt_nchw;
@@ -194,11 +212,11 @@ void MKLDNNSplitLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
 {
     VLOG(1) << "MKLDNNSplitLayer<Dtype>::Backward_cpu: " << this->layer_param_.name();
     // If no gradient to be computed for eariler layers then we do need to do
-    //  any computation 
+    //  any computation
     if (!propagate_down[0]) {
         return;
     }
-    if (splitBwd_pd_ == NULL) {
+    if (splitBwd_pd_ == NULL || this->reshape) {
         InitSplitBwd(bottom, top);
     }
     

@@ -90,15 +90,15 @@ class PoolingLayer : public Layer<Dtype> {
   virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
       const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
 
-  /// @brief The spatial dimensions of a filter kernel.
+  // @brief The spatial dimensions of a filter kernel.
   Blob<int> kernel_shape_;
-  /// @brief The spatial dimensions of the stride.
+  // @brief The spatial dimensions of the stride.
   Blob<int> stride_;
-  /// @brief The spatial dimensions of the padding.
+  // @brief The spatial dimensions of the padding.
   Blob<int> pad_;
-  /// @brief The spatial dimensions of the input.
+  // @brief The spatial dimensions of the input.
   Blob<int> input_shape_;
-  /// @brief The spatial dimensions of the output.
+  // @brief The spatial dimensions of the output.
   Blob<int> output_shape_;
 
   int num_spatial_axes_;

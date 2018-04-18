@@ -50,8 +50,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace caffe {
 namespace cpu {
 
-int has_intel_knl_features();
-
 struct Processor {
   unsigned processor;
   unsigned physicalId;
@@ -85,7 +83,7 @@ class CpuInfo : public CpuInfoInterface {
   const char *currentLine;
 
   void loadContentFromFile(const char *fileName);
-  void loadContent(const char *content);
+  void loadContent(std::string &content);
   void parseLines(char *content);
 };
 

@@ -360,7 +360,7 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   auto sum_src_pd = conv_fwd_pd->dst_primitive_desc();
   auto sum_dst_md = sum_src_pd.desc();
   vector<memory::primitive_desc> sum_srcs_pd(ker_dims[0], sum_src_pd);
-  vector<double> sum_scale(ker_dims[0], 1.0);
+  vector<float> sum_scale(ker_dims[0], 1.0);
   auto sum_fwd_pd = new sum::primitive_desc(sum_dst_md, sum_scale, sum_srcs_pd);
 
   auto sum_src_bwd_data_pd = conv_bwd_data_pd->diff_src_primitive_desc();
@@ -371,14 +371,14 @@ void ConvolutionLayer<Dtype>::ReshapeForMKLdnn(const vector<Blob<Dtype>*>& botto
   auto sum_src_bwd_wgts_pd = conv_bwd_wgts_pd->diff_weights_primitive_desc();
   auto sum_dst_bwd_wgts_md = sum_src_bwd_wgts_pd.desc();
   vector<memory::primitive_desc> sum_srcs_bwd_wgts_pd(bottom.size() * out_dims[0], sum_src_bwd_wgts_pd);
-  vector<double> sum_bwd_wgts_scale(bottom.size() * out_dims[0], 1.0);
+  vector<float> sum_bwd_wgts_scale(bottom.size() * out_dims[0], 1.0);
   auto sum_bwd_wgts_pd = new sum::primitive_desc(sum_dst_bwd_wgts_md, sum_bwd_wgts_scale, sum_srcs_bwd_wgts_pd);
 
   auto sum_src_bwd_bias_pd = (this->bias_term_) ? conv_bwd_wgts_pd->diff_bias_primitive_desc() :
                                                  conv_bwd_wgts_pd->diff_weights_primitive_desc();
   auto sum_dst_bwd_bias_md = sum_src_bwd_bias_pd.desc();
   vector<memory::primitive_desc> sum_srcs_bwd_bias_pd(bottom.size() * out_dims[0], sum_src_bwd_bias_pd);
-  vector<double> sum_bwd_bias_scale(bottom.size() * ker_dims[0] * out_dims[0], 1.0);
+  vector<float> sum_bwd_bias_scale(bottom.size() * ker_dims[0] * out_dims[0], 1.0);
   auto sum_bwd_bias_pd = new sum::primitive_desc(sum_dst_bwd_bias_md, sum_bwd_bias_scale, sum_srcs_bwd_bias_pd);
 
   // init forward memory & pipeline

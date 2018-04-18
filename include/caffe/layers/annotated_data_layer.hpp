@@ -42,6 +42,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 
 #include "caffe/blob.hpp"
+#include "caffe/data_reader.hpp"
 #include "caffe/data_transformer.hpp"
 #include "caffe/internal_thread.hpp"
 #include "caffe/layer.hpp"
@@ -58,19 +59,16 @@ class AnnotatedDataLayer : public BasePrefetchingDataLayer<Dtype> {
   virtual ~AnnotatedDataLayer();
   virtual void DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top);
+  // AnnotatedDataLayer uses DataReader instead for sharing for parallelism
+  virtual inline bool ShareInParallel() const { return false; }
   virtual inline const char* type() const { return "AnnotatedData"; }
   virtual inline int ExactNumBottomBlobs() const { return 0; }
   virtual inline int MinTopBlobs() const { return 1; }
 
  protected:
-  void Next();
-  bool Skip();
   virtual void load_batch(Batch<Dtype>* batch);
 
-  shared_ptr<db::DB> db_;
-  shared_ptr<db::Cursor> cursor_;
-  uint64_t offset_;
-
+  DataReader reader_;
   bool has_anno_type_;
   AnnotatedDatum_AnnotationType anno_type_;
   vector<BatchSampler> batch_samplers_;

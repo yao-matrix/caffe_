@@ -119,12 +119,6 @@ bool UpgradeSolverAsNeeded(const string& param_file, SolverParameter* param);
 // Read parameters from a file into a SolverParameter proto message.
 void ReadSolverParamsFromTextFileOrDie(const string& param_file,
                                        SolverParameter* param);
-
-#ifdef USE_MLSL
-void ReplaceMultinodeSolverParams(SolverParameter* param);
-
-void ReplaceMultinodeNetParams(NetParameter* sparam);
-#endif
 }  // namespace caffe
 
 #endif   // CAFFE_UTIL_UPGRADE_PROTO_H_

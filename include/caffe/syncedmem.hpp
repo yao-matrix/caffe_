@@ -48,8 +48,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "boost/thread/mutex.hpp"
 #include "caffe/common.hpp"
 
-#include "caffe/multinode/mlsl.hpp"
-
 namespace caffe {
 
 // If CUDA is available and in GPU mode, host memory will be allocated pinned,
@@ -66,21 +64,11 @@ inline void CaffeMallocHost(void** ptr, size_t size, bool* use_cuda) {
   }
 #endif
 
-#ifdef USE_MLSL
-  if (mn::is_multinode()) {
-    *ptr = mn::alloc(size ? size : 1, 64);
-  } else {
-#endif /* !USE_MLSL */
-
 #ifdef USE_MKL
     *ptr = mkl_malloc(size ? size : 1, 64);
 #else
    *ptr = malloc(size);
 #endif
-
-#ifdef USE_MLSL
-  }
-#endif /* USE_MLSL */
 
   *use_cuda = false;
   CHECK(*ptr) << "host allocation of size " << size << " failed";
@@ -94,22 +82,11 @@ inline void CaffeFreeHost(void* ptr, bool use_cuda) {
   }
 #endif
 
-#ifdef USE_MLSL
-  if (mn::is_multinode()) {
-    mn::free(ptr);
-  } else {
-#endif /* !USE_MLSL */
-
 #ifdef USE_MKL
     mkl_free(ptr);
 #else
     free(ptr);
 #endif
-
-#ifdef USE_MLSL
-  }
-#endif /* USE_MLSL */
-
 }
 
 // Base class
@@ -140,9 +117,22 @@ struct PrvMemDescr {
  */
 class SyncedMemory {
  public:
-  SyncedMemory();
-  explicit SyncedMemory(size_t size);
+  SyncedMemory()
+      : cpu_ptr_(NULL), gpu_ptr_(NULL),
+        size_(0), head_(UNINITIALIZED), own_cpu_data_(false),
+        cpu_malloc_use_cuda_(false), own_gpu_data_(false), own_prv_data_(false),
+        gpu_device_(-1)
+
+        {}
+  explicit SyncedMemory(size_t size)
+      : cpu_ptr_(NULL), gpu_ptr_(NULL),
+        size_(size), head_(UNINITIALIZED), own_cpu_data_(false),
+        cpu_malloc_use_cuda_(false), own_gpu_data_(false), own_prv_data_(false),
+        gpu_device_(-1)
+
+        {}
   ~SyncedMemory();
+  void swap(shared_ptr<SyncedMemory> other);
   const void* cpu_data();
   void set_cpu_data(void* data);
   const void* gpu_data();
@@ -166,19 +156,17 @@ class SyncedMemory {
 #endif
 
  private:
-  void check_device();
-
   void to_cpu();
   void to_gpu();
   void* cpu_ptr_;
   void* gpu_ptr_;
-  size_t size_;
+  const size_t size_;
   SyncedHead head_;
   bool own_cpu_data_;
   bool cpu_malloc_use_cuda_;
   bool own_gpu_data_;
   bool own_prv_data_;
-  int device_;
+  int gpu_device_;
   boost::mutex mtx;
 
   DISABLE_COPY_AND_ASSIGN(SyncedMemory);

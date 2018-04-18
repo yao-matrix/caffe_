@@ -89,6 +89,11 @@ class MKLConvolutionLayer : public ConvolutionLayer<Dtype> {
   void Reshape(const vector<Blob<Dtype>*>& bottom,
           const vector<Blob<Dtype>*>& top);
 
+  void CreateFwdPrimitive();
+  void CreateBwdDataPrimitive();
+  void CreateBwdFilterPrimitive();
+  void CreateBwdBiasPrimitive();
+
  private:
   /* Fwd step */
   shared_ptr<MKLData<Dtype> > fwd_bottom_data, fwd_top_data, fwd_filter_data,
@@ -130,6 +135,25 @@ class MKLConvolutionLayer : public ConvolutionLayer<Dtype> {
          pad_h_;
 
   bool bprop_unpack_called;
+
+  // for reshape
+  bool reshape;
+  
+  size_t bdata_sizes[4];
+  size_t bdata_strides[4];
+
+  size_t f_dimension;
+  size_t fdata_sizes[5];
+  size_t fdata_strides[5];
+
+  size_t bias_sizes[1];
+  size_t bias_strides[1];
+
+  size_t tdata_sizes[4];
+  size_t tdata_strides[4];
+
+  size_t convolutionStrides[2];
+  int    inputOffset[2];
 
   PERFORMANCE_EVENT_ID_DECL(perf_id_fw_);
   PERFORMANCE_EVENT_ID_DECL(perf_id_bw_);
@@ -353,6 +377,10 @@ class MKLPoolingLayer : public Layer<Dtype> {
   shared_ptr<MKLDiff<Dtype> > bwd_top_diff, bwd_bottom_diff;
 
   dnnPrimitive_t poolingFwd, poolingBwd;
+  bool   reshape;
+  size_t dim;
+  size_t src_sizes[4], src_strides[4];
+  size_t dst_sizes[4], dst_strides[4];
 
   PERFORMANCE_EVENT_ID_DECL(perf_id_fw_);
   PERFORMANCE_EVENT_ID_DECL(perf_id_bw_);
@@ -413,6 +441,8 @@ class MKLReLULayer : public NeuronLayer<Dtype> {
   dnnPrimitive_t reluFwd_, reluBwd_;
   vector<size_t> sizes_;
   vector<size_t> strides_;
+  bool           reshape;
+  size_t         dim;
 
   PERFORMANCE_EVENT_ID_DECL(perf_id_fw_);
   PERFORMANCE_EVENT_ID_DECL(perf_id_bw_);
@@ -485,12 +515,11 @@ class MKLBatchNormLayer : public Layer<Dtype> {
         batchNormFwd(static_cast<dnnPrimitive_t>(NULL)),
         batchNormFwdInference(static_cast<dnnPrimitive_t>(NULL)),
         batchNormBwd(static_cast<dnnPrimitive_t>(NULL)),
-        mean_buffer_(static_cast<Dtype*>(NULL)),
-        variance_buffer_(static_cast<Dtype*>(NULL)),
         scaleShift_buffer_(static_cast<Dtype*>(NULL)),
         diffScaleShift_buffer_(static_cast<Dtype*>(NULL)),
-        layout_usr_(static_cast<dnnLayout_t>(NULL))
-      {
+        layout_usr_(static_cast<dnnLayout_t>(NULL)),
+        num_stats_batches_(1),
+        stats_batch_size_(0)      {
         blobs_initialized_ = false;
         use_global_stats_ = false;
 
@@ -507,9 +536,6 @@ class MKLBatchNormLayer : public Layer<Dtype> {
   virtual inline const char* type() const { return "BatchNorm"; }
   virtual inline int ExactNumBottomBlobs() const { return 1; }
   virtual inline int ExactNumTopBlobs() const { return 1; }
-#ifdef USE_MLSL
-  virtual bool ParamNeedReduce(int param_id) { return param_id >= 3; }
-#endif
 
  protected:
   virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
@@ -520,6 +546,12 @@ class MKLBatchNormLayer : public Layer<Dtype> {
       const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
   virtual void Backward_gpu(const vector<Blob<Dtype>*>& top,
      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom);
+
+  void ForwardStatsBatch_cpu(const vector<Blob<Dtype>*>& bottom,
+      const vector<Blob<Dtype>*>& top, int stats_batch_idx);
+  void BackwardStatsBatch_cpu(const vector<Blob<Dtype>*>& top,
+      const vector<bool>& propagate_down, const vector<Blob<Dtype>*>& bottom,
+      int stats_batch_idx);
 
   void Init(const vector<Blob<Dtype>*>& bottom,
             const vector<Blob<Dtype>*>& top);
@@ -542,13 +574,16 @@ class MKLBatchNormLayer : public Layer<Dtype> {
   shared_ptr<MKLDiff<Dtype> > bwd_bottom_diff;
   Blob<Dtype> temp_;
   dnnPrimitive_t batchNormFwd, batchNormFwdInference, batchNormBwd;
-  Dtype *mean_buffer_;
-  Dtype *variance_buffer_;
+  vector<Dtype *> mean_buffers_;
+  vector<Dtype *> variance_buffers_;
   Dtype *scaleShift_buffer_;
   Dtype *diffScaleShift_buffer_;
   dnnLayout_t layout_usr_;
   bool use_global_stats_;
+
   bool blobs_initialized_;
+  int num_stats_batches_;
+  int stats_batch_size_;
 
   PERFORMANCE_EVENT_ID_DECL(perf_id_fw_);
   PERFORMANCE_EVENT_ID_DECL(perf_id_bw_);

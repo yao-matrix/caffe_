@@ -60,33 +60,6 @@ else
 	OTHER_BUILD_DIR := $(DEBUG_BUILD_DIR)
 endif
 
-
-#################### MLSL ####################
-
-ifeq ($(USE_MLSL), 1)
-	RETURN_STRING=$(shell ./external/mlsl/prepare_mlsl.sh)
-	MLSL_ROOT=$(firstword $(RETURN_STRING))
-	MLSL_LDFLAGS=$(lastword $(RETURN_STRING))
-	COMMON_FLAGS += -DUSE_MLSL=1
-	LIBRARIES += mlsl
-	INCLUDE_DIRS += $(MLSL_ROOT)/intel64/include
-	LIBRARY_DIRS += $(MLSL_ROOT)/intel64/lib
-
-ifeq ($(CAFFE_PER_LAYER_TIMINGS), 1)
-	COMMON_FLAGS += -DCAFFE_PER_LAYER_TIMINGS
-endif
-
-ifeq ($(CAFFE_MLSL_SHUFFLE), 1)
-	COMMON_FLAGS += -DCAFFE_MLSL_SHUFFLE
-endif
-
-ifeq ($(FW_OVERLAP_OPT), 1)
-	COMMON_FLAGS += -DFW_OVERLAP_OPT
-endif
-endif
-#################### MLSL ####################
-
-
 # All of the directories containing code.
 SRC_DIRS := $(shell find * -type d -exec bash -c "find {} -maxdepth 1 \
 	\( -name '*.cpp' -o -name '*.proto' \) | grep -q ." \; -print)

@@ -52,7 +52,7 @@ namespace caffe {
 
 template <typename Dtype>
 MKLDNNConvolutionLayer<Dtype>::MKLDNNConvolutionLayer(const LayerParameter& param)
-            : MKLDNNLayer<Dtype>(), ConvolutionLayer<Dtype>(param)
+            : MKLDNNLayer<Dtype>(param), ConvolutionLayer<Dtype>(param)
             , fwd_bottom_data(NULL), fwd_top_data(NULL), fwd_weights_data(NULL), fwd_bias_data(NULL)
             , bwdd_weights_data(NULL), bwdw_bottom_data(NULL)
             , bwdd_bottom_diff(NULL), bwdd_top_diff(NULL)
@@ -64,7 +64,11 @@ MKLDNNConvolutionLayer<Dtype>::MKLDNNConvolutionLayer(const LayerParameter& para
             , bwdd_top_diff_primitive(NULL), bwdd_weights_data_primitive(NULL)
             , bwdw_top_diff_primitive(NULL), bwdw_bottom_data_primitive(NULL)
             , width_(0), height_(0), width_out_(0), height_out_(0), kernel_w_(0), kernel_h_(0)
-            , stride_w_(0), stride_h_(0), pad_w_(0), pad_h_(0)
+            , stride_w_(0), stride_h_(0), pad_w_(0), pad_h_(0),
+            bwdw_weights_diff_iter(NULL),
+            bwdw_bias_diff_iter(NULL),
+            bwdw_weights_diff_memory_iter(NULL),
+            bwdw_bias_diff_memory_iter(NULL)
 {
   PERFORMANCE_EVENT_ID_RESET(perf_id_fw_);
   PERFORMANCE_EVENT_ID_RESET(perf_id_bw_);
@@ -75,10 +79,8 @@ template <typename Dtype>
 void MKLDNNConvolutionLayer<Dtype>::compute_output_shape()
 {
     ConvolutionLayer<Dtype>::compute_output_shape();
-    this->height_out_ = (this->height_ + 2 * this->pad_h_ - this->kernel_h_)
-        / this->stride_h_ + 1;
-    this->width_out_ = (this->width_ + 2 * this->pad_w_ - this->kernel_w_)
-        / this->stride_w_ + 1;
+    this->height_out_ = this->output_shape_[0];
+    this->width_out_ = this->output_shape_[1];
 }
 
 template <typename Dtype>
@@ -89,10 +91,13 @@ void MKLDNNConvolutionLayer<Dtype>::init_properties(const vector<Blob<Dtype>*>& 
     this->stride_h_ = this->stride_.cpu_data()[0];
     this->width_ = bottom[0]->width();
     this->height_ = bottom[0]->height();
+    this->channels_ = bottom[0]->channels();
+    this->num_ = bottom[0]->num();
     this->pad_w_ = this->pad_.cpu_data()[1];
     this->pad_h_ = this->pad_.cpu_data()[0];
     this->kernel_w_ = this->kernel_shape_.cpu_data()[1];
     this->kernel_h_  = this->kernel_shape_.cpu_data()[0];
+
     string _conv_algorithm = this->layer_param_.convolution_param().conv_algorithm();
     if(_conv_algorithm == "direct")
     {
@@ -114,9 +119,20 @@ void MKLDNNConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& botto
                                             , const vector<Blob<Dtype>*>& top)
 {
     VLOG(1) << "<< MKLDNNConvolutionLayer<Dtype>::LayerSetUp: " << this->layer_param_.name();
+    if (this->layer_param_.has_quantization_param() && this->phase_ == TEST) this->need_quantize_ = true;
+
     ConvolutionLayer<Dtype>::LayerSetUp(bottom, top);
     init_properties(bottom, top);
     this->bottom_shape_ = &bottom[0]->shape();
+
+    // support for (iter_size > 1) requires additional buffer for weights diff and bias diff
+    // Because Net is initialized before Caffe::set_iter_size, so additional buffer should be new and set here
+    bwdw_weights_diff_iter_blob.reset(new Blob<Dtype>());
+    bwdw_weights_diff_iter_blob->ReshapeLike(*(this->blobs_[0]));
+    if (this->bias_term_) {
+      bwdw_bias_diff_iter_blob.reset(new Blob<Dtype>());
+      bwdw_bias_diff_iter_blob->ReshapeLike(*(this->blobs_[1]));
+    }
 }
 
 template <typename Dtype>
@@ -124,8 +140,17 @@ void MKLDNNConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom
                                             , const vector<Blob<Dtype>*>& top)
 {
     VLOG(1) << " MKLDNNConvolutionLayer<Dtype>::Reshape: " << this->layer_param_.name();
-    BaseConvolutionLayer<Dtype>::ReshapeForMKL(bottom, top);
+    this->reshape = (this->width_ == bottom[0]->width() &&
+                     this->height_ == bottom[0]->height() &&
+                     this->channels_ == bottom[0]->channels() &&
+                     this->num_ == bottom[0]->num()) ? false : true;
     init_properties(bottom, top);
+    BaseConvolutionLayer<Dtype>::ReshapeForMKL(bottom, top);
+#ifndef DISABLE_CONV_SUM_FUSION
+    if (bottom.size() > 1) {
+        top[0]->ShareData(*bottom[1]);
+    }
+#endif
 }
 
 template <typename Dtype>
@@ -155,11 +180,62 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionFwd(const vector<Blob<Dtype>*
     int32_t kw = this->kernel_w_;
     int32_t kh = this->kernel_h_;
 
-    memory::dims convolutionStrides {this->stride_h_, this->stride_w_};
-    memory::dims padding {this->pad_h_, this->pad_w_};
+    int32_t sw = this->stride_w_;
+    int32_t sh = this->stride_h_;
+
+    int32_t pw = this->pad_w_;
+    int32_t ph = this->pad_h_;
+    memory::dims convolutionStrides {sh, sw};
+    memory::dims padding {ph, pw};
+    memory::dims padding_r;
+    memory::dims dilation;
+    bool dilated_conv = false;
+    const int* dilation_data = this->dilation_.cpu_data();
+    for (int i = 0; i < this->num_spatial_axes_; ++i) {
+      dilation.push_back(dilation_data[i] - 1);
+      if (dilation_data[i] != 1) dilated_conv = true;
+    }
+    padding_r.push_back((oh - 1) * sh - ih + ((kh - 1) * (dilation_data[0]) + 1) - ph);
+    padding_r.push_back((ow - 1) * sw - iw + ((kw - 1) * (dilation_data[1]) + 1) - pw);
 
     // ---- Initialize memory descriptors (fromat = any) to create convolution descriptor -------------
     memory::data_type mpcsn = memory::data_type::f32;
+    memory::data_type bottom_dt = this->need_quantize_ ? memory::data_type::u8 : memory::data_type::f32;
+    memory::data_type top_dt = memory::data_type::f32;
+
+    if (this->need_quantize_) {
+      if (this->bw_layer_out_ == 8) {
+        if (relu) {
+          top_dt = memory::data_type::u8;
+        }
+        else {
+          top_dt = memory::data_type::s8;
+        }
+      }
+      else {
+        top_dt = memory::data_type::s32;
+      }
+    }
+
+    bool is_sum;
+    if (bottom.size() > 1) {
+      is_sum = true;
+
+      memory::data_type bottom_1_dt = memory::data_type::f32;
+      if (const_cast<Dtype*>(bottom[1]->prv_data()) != NULL){
+    
+        shared_ptr<MKLDNNMemoryDescriptor<Dtype, false> > bottom_1_desc =
+            get_mkldnn_prv_descriptor<Dtype, false>(bottom[1]);
+        bottom_1_dt = static_cast<memory::data_type>(bottom_1_desc->prv_memory_pd()->desc().data.data_type);
+      } 
+
+      if (top_dt != bottom_1_dt) {
+        top_dt = bottom_1_dt;
+      }
+    }
+
+    memory::data_type weights_dt = this->need_quantize_ ? memory::data_type::s8 : memory::data_type::f32;
+    memory::data_type bias_dt = this->need_quantize_ ? memory::data_type::s32 : memory::data_type::f32;
     memory::format mfmt_any = memory::format::any;
 
     memory::dims bottom_tz = {n, ic, ih, iw};
@@ -168,52 +244,135 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionFwd(const vector<Blob<Dtype>*
     memory::dims weights_tz = (g!= 1) ? memory::dims{g, oc/g, ic/g, kh, kw} : memory::dims{oc, ic, kh, kw};
 
     // ---- Memory descriptors for initializing of convolution primitive descriptor -------------
-    memory::desc init_bottom_md({bottom_tz}, mpcsn, mfmt_any);
-    memory::desc init_bias_md({bias_tz}, mpcsn, mfmt_any);
-    memory::desc init_top_md({top_tz}, mpcsn, mfmt_any);
-    memory::desc init_weights_md({weights_tz}, mpcsn, mfmt_any);
+    memory::desc init_bottom_md({bottom_tz}, bottom_dt, mfmt_any);
+    memory::desc init_bias_md({bias_tz}, bias_dt, mfmt_any);
+    memory::desc init_top_md({top_tz}, top_dt, mfmt_any);
+    memory::desc init_weights_md({weights_tz}, weights_dt, mfmt_any);
 
+    primitive_attr attr;
+    if (this->need_quantize_) {
+      if(this->scale_in_.size() > 0) this->is_float_ = true;
+      int mask = 0;
+      int count = 1; //single channel
+      if(this->fl_params_.size() > 1 || this->scale_params_.size() > 1){
+          int oc_dim_id = 1;
+          mask = 1 << oc_dim_id;
+          count = oc;  //multi channel
+      }
+      std::vector<float> scales(count);
+      float scale;
+      if(this->is_float_){
+        #pragma omp parallel for if (count > 1)
+        for(int i=0; i<count; i++){
+          scale = this->scale_out_[0] / (this->scale_in_[0] * this->scale_params_[i]);
+          scales[i] = scale;
+        }
+      } else {
+        int output_shift;
+        #pragma omp parallel for if (count > 1)
+        for(int i=0; i<count; i++){
+          output_shift = this->fl_layer_out_[0] - this->fl_layer_in_[0] - this->fl_params_[i];
+          scale = pow(2. ,output_shift);
+          scales[i] = scale;
+        }
+      }
+      attr.set_output_scales(mask, scales);
+      attr.set_int_output_round_mode(round_nearest);
+    }
+    
     // ---- Determining engine to use -----------------------
     std::string subengines = this->layer_param_.engine();
     if (subengines == "" || subengines == "MKLDNN")
       subengines = "MKLDNN:CPU";
     EngineParser ep(subengines);
     unsigned subEngineIndex = 0;
-    shared_ptr<convolution_relu_forward::primitive_desc> convReluFwd_pd;
     mkldnn::algorithm eligibleAlgorithms[2] = {conv_algorithm, algorithm::convolution_direct};
-    for (auto &convAlgorithm : eligibleAlgorithms) {
-        // ---- Initialize convolution primitive descriptor -------------
-        shared_ptr<convolution_forward::desc> convFwd_desc;
-        if (this->bias_term_) {
-            convFwd_desc.reset(new convolution_forward::desc(propagation, convAlgorithm
-                                                             , init_bottom_md, init_weights_md, init_bias_md, init_top_md
-                                                             , convolutionStrides, padding, padding, padding_kind::zero));
-        } else {
-            convFwd_desc.reset(new convolution_forward::desc(propagation, convAlgorithm
-                                                             , init_bottom_md, init_weights_md, init_top_md
-                                                             , convolutionStrides, padding, padding, padding_kind::zero));
-        }
-        shared_ptr<convolution_relu_forward::desc> convReluFwd_desc;
-        if(relu) convReluFwd_desc.reset(new convolution_relu_forward::desc(*convFwd_desc, negative_slope));
+    convFwd_pd = NULL;
+    mkldnn::post_ops ops;
 
-        for(subEngineIndex=0; subEngineIndex < ep.getNumberOfSubEngines(); subEngineIndex++) {
-            try {
-                convFwd_pd.reset(new convolution_forward::primitive_desc(*convFwd_desc,
-                                                                         ep.getMKLDNNSubEngine(subEngineIndex)));
-                if(relu) convReluFwd_pd.reset(new convolution_relu_forward::primitive_desc(*convReluFwd_desc,
-                                                                                           ep.getMKLDNNSubEngine(subEngineIndex)));
-            }
-            catch(...) {
-                continue;
-            }
-            break;
+#ifndef DISABLE_CONV_SUM_FUSION
+    if(relu || bottom.size() > 1) {
+#else
+    if(relu) {
+#endif
+        float scale = 1.0f;
+        Dtype alpha = negative_slope;  // negative slope for mkldnn_eltwise_relu.
+        float beta = 1.0f;  //ignored for mkldnn_eltwise_relu.
+#ifndef DISABLE_CONV_SUM_FUSION
+        if (bottom.size() > 1) {
+          if (this->need_quantize_) {
+            float sum_scale;
+            if(this->is_float_){
+                sum_scale = this->scale_out_[0] /
+                      get_mkldnn_prv_descriptor<Dtype, false>(bottom[1])->get_scale(0);
+            } else{
+                int sum_shift =
+                    this->fl_layer_out_[0] -
+                    get_mkldnn_prv_descriptor<Dtype, false>(bottom[1])->get_fl(0);          
+                sum_scale = pow(2., sum_shift);
+            } 
+            ops.append_sum(sum_scale);
+          } else {
+            ops.append_sum(1.0f);
+          }
         }
-        if ((convFwd_pd) && (!relu || convReluFwd_pd))
-                break;
+#endif
+        ops.append_eltwise(scale, eltwise_relu, alpha, beta);
+        attr.set_post_ops(ops);
+    }
+
+    for (auto& convAlgorithm : eligibleAlgorithms) {
+      // ---- Initialize convolution primitive descriptor -------------
+      shared_ptr<convolution_forward::desc> convFwd_desc;
+      if (this->bias_term_) {
+          if (dilated_conv)
+              convFwd_desc.reset(new convolution_forward::desc(
+                  propagation, convAlgorithm, init_bottom_md, init_weights_md,
+                  init_bias_md, init_top_md, convolutionStrides, dilation, padding, padding_r,
+                  padding_kind::zero));
+          else
+              convFwd_desc.reset(new convolution_forward::desc(
+                  propagation, convAlgorithm, init_bottom_md, init_weights_md,
+                  init_bias_md, init_top_md, convolutionStrides, padding, padding,
+                  padding_kind::zero));
+      } else {
+          if (dilated_conv)
+              convFwd_desc.reset(new convolution_forward::desc(
+                  propagation, convAlgorithm, init_bottom_md, init_weights_md,
+                  init_top_md, convolutionStrides, dilation, padding, padding_r,
+                  padding_kind::zero));
+          else
+              convFwd_desc.reset(new convolution_forward::desc(
+                  propagation, convAlgorithm, init_bottom_md, init_weights_md,
+                  init_top_md, convolutionStrides, padding, padding,
+                  padding_kind::zero));
+      }
+
+      for (subEngineIndex = 0; subEngineIndex < ep.getNumberOfSubEngines();
+           subEngineIndex++) {
+        try {
+#ifndef DISABLE_CONV_SUM_FUSION
+            if(this->need_quantize_ || relu || bottom.size() > 1) {
+#else
+            if(relu) {
+#endif
+                convFwd_pd.reset(new convolution_forward::primitive_desc(
+                *convFwd_desc, attr, ep.getMKLDNNSubEngine(subEngineIndex)));
+          } else {
+            convFwd_pd.reset(new convolution_forward::primitive_desc(
+                *convFwd_desc, ep.getMKLDNNSubEngine(subEngineIndex)));
+          }
+
+        } catch (...) {
+            continue;
+        }
+        
+        break;
+      }
+      if (convFwd_pd) break;
     }
 
     CHECK(convFwd_pd);
-    if (relu) CHECK(convReluFwd_pd);
     engine cpu_engine = CpuEngine::Instance().get_engine();
 
     // ---- Create priv memory primitive descriptors stored as class members -------------
@@ -223,57 +382,140 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionFwd(const vector<Blob<Dtype>*
     shared_ptr<MemPD> prv_fwd_top_data_memory_pd(new MemPD(convFwd_pd->dst_primitive_desc()));
     shared_ptr<MemPD> prv_fwd_weights_data_memory_pd(new MemPD(convFwd_pd->weights_primitive_desc()));
 
+    // ---- Log prv memory primitive descriptors -------------
+    info_mem_pd<Dtype>(prv_fwd_bottom_data_memory_pd, "conv_src:" + this->layer_param_.name());
+    info_mem_pd<Dtype>(prv_fwd_top_data_memory_pd, "conv_dst:" + this->layer_param_.name());
+    
     // ---- Create usr memory primitive descriptors -------------
     memory::format mfmt_nchw = memory::format::nchw;
     memory::format weights_mfmt = (g!= 1) ? memory::format::goihw : memory::format::oihw;
 
     // TODO: There should not be a problem to use this for Backward as well
+    
     shared_ptr<MemPD> usr_bottom_data_memory_pd(new MemPD({{bottom_tz}, mpcsn, mfmt_nchw}, cpu_engine));
     shared_ptr<MemPD> usr_bias_data_memory_pd(new MemPD({{bias_tz}, mpcsn, memory::format::x}, cpu_engine));
     shared_ptr<MemPD> usr_top_data_memory_pd(new MemPD({{top_tz}, mpcsn, mfmt_nchw}, cpu_engine));
     shared_ptr<MemPD> usr_weights_data_memory_pd(new MemPD({{weights_tz}, mpcsn, weights_mfmt}, cpu_engine));
 
-
     // ---  init primitive and prv_memory descriptors ----------------------
-    fwd_bottom_data.reset(new MKLDNNData<Dtype>(usr_bottom_data_memory_pd, prv_fwd_bottom_data_memory_pd, bottom[0], this));
-    fwd_bottom_data ->name = "fwd_bottom_data   @ " + this->layer_param_.name();
+    bool bottom_is_float = false;
+    if (const_cast<Dtype*>(bottom[0]->prv_data()) != NULL) {
+        shared_ptr<MKLDNNMemoryDescriptor<Dtype, false> > blob_prv_mkldnn_mem_descr = get_mkldnn_prv_descriptor<Dtype, false>(bottom[0]);
+        bottom_is_float = blob_prv_mkldnn_mem_descr->get_float();
+    }
+    if (this->need_quantize_){
+      if(this->is_float_ || bottom_is_float){
+        std::vector<float> scale_bottom;
+        scale_bottom.push_back(this->scale_in_[0]);
+        fwd_bottom_data.reset(new MKLDNNData<Dtype>(usr_bottom_data_memory_pd, prv_fwd_bottom_data_memory_pd, bottom[0], this, true, scale_bottom));
+      } else{
+        std::vector<int> fl_bottom;
+        fl_bottom.push_back(this->fl_layer_in_[0]);
+        fwd_bottom_data.reset(new MKLDNNData<Dtype>(usr_bottom_data_memory_pd, prv_fwd_bottom_data_memory_pd, bottom[0], this, fl_bottom));
+      }       
+    } else if(bottom_is_float){
+      fwd_bottom_data.reset(new MKLDNNData<Dtype>(usr_bottom_data_memory_pd, prv_fwd_bottom_data_memory_pd, bottom[0], this, false));
+    } else{
+      fwd_bottom_data.reset(new MKLDNNData<Dtype>(usr_bottom_data_memory_pd, prv_fwd_bottom_data_memory_pd, bottom[0], this));
+    }
+    fwd_bottom_data->name = "fwd_bottom_data   @ " + this->layer_param_.name();
     fwd_bottom_data_primitive = fwd_bottom_data->create_input(false);
 
-    fwd_top_data.reset(new MKLDNNData<Dtype>(usr_top_data_memory_pd, prv_fwd_top_data_memory_pd, top[0], this));
-    fwd_top_data    ->name = "fwd_top_data      @ " + this->layer_param_.name();
+    if (this->need_quantize_){
+      if(this->is_float_ || bottom_is_float){
+        std::vector<float> scale_top;
+        scale_top.push_back(this->scale_out_[0]);
+        fwd_top_data.reset(new MKLDNNData<Dtype>(usr_top_data_memory_pd, prv_fwd_top_data_memory_pd, top[0], this, true, scale_top, is_sum));
+      } else{
+        std::vector<int> fl_top;
+        fl_top.push_back(this->fl_layer_out_[0]);
+        fwd_top_data.reset(new MKLDNNData<Dtype>(usr_top_data_memory_pd, prv_fwd_top_data_memory_pd, top[0], this, fl_top, is_sum));
+      }
+    } else if(bottom_is_float){ 
+      fwd_top_data.reset(new MKLDNNData<Dtype>(usr_top_data_memory_pd, prv_fwd_top_data_memory_pd, top[0], this, false));
+    } else{
+      fwd_top_data.reset(new MKLDNNData<Dtype>(usr_top_data_memory_pd, prv_fwd_top_data_memory_pd, top[0], this));
+    }
+    fwd_top_data->name = "fwd_top_data      @ " + this->layer_param_.name();
     fwd_top_data_memory = fwd_top_data->create_output_memory();
 
-    fwd_weights_data.reset(new MKLDNNData<Dtype>(usr_weights_data_memory_pd, prv_fwd_weights_data_memory_pd, this->blobs_[0].get(), this));
-    fwd_weights_data->name = "fwd_weights_data  @ " + this->layer_param_.name();
-    fwd_weights_data_primitive = fwd_weights_data->create_input(true);
+    if (fwd_weights_data == NULL) {
+      if (this->need_quantize_){
+        int count = 1; //single channel
+        if(this->is_float_ || bottom_is_float){
+          if(this->scale_params_.size() > 1){
+              count = oc;  //multi channel
+          }
+          std::vector<float> scale_weight(count);
+          #pragma omp parallel for if (count > 1)
+          for(int i=0; i<count; i++){
+            scale_weight[i] = this->scale_params_[i];
+          }
+          fwd_weights_data.reset(new MKLDNNData<Dtype>(usr_weights_data_memory_pd, prv_fwd_weights_data_memory_pd, this->blobs_[0].get(), this, true, scale_weight));
+        } else{
+          if(this->fl_params_.size() > 1){
+              count = oc;  //multi channel
+          }
+          std::vector<int> fl_weight(count);
+          #pragma omp parallel for if (count > 1)
+          for(int i=0; i<count; i++){
+            fl_weight[i] = this->fl_params_[i];
+          }
+          fwd_weights_data.reset(new MKLDNNData<Dtype>(usr_weights_data_memory_pd, prv_fwd_weights_data_memory_pd, this->blobs_[0].get(), this, fl_weight));
+        }
+      } else if(bottom_is_float){
+        fwd_weights_data.reset(new MKLDNNData<Dtype>(usr_weights_data_memory_pd, prv_fwd_weights_data_memory_pd, this->blobs_[0].get(), this, false));
+      } else{
+        fwd_weights_data.reset(new MKLDNNData<Dtype>(usr_weights_data_memory_pd, prv_fwd_weights_data_memory_pd, this->blobs_[0].get(), this));
+      }
+      fwd_weights_data->name = "fwd_weights_data  @ " + this->layer_param_.name();
+      fwd_weights_data_primitive = fwd_weights_data->create_input(true);
+    }
 
     if (this->bias_term_) {
-        shared_ptr<MemPD> prv_fwd_bias_data_memory_pd(new MemPD(convFwd_pd->bias_primitive_desc()));
-        fwd_bias_data.reset(new MKLDNNData<Dtype>(usr_bias_data_memory_pd, prv_fwd_bias_data_memory_pd, this->blobs_[1].get(), this));
-        fwd_bias_data->name = "fwd_bias_data     @ " + this->layer_param_.name();
-        fwd_bias_data_primitive = fwd_bias_data->create_input(true);
-        if(relu) {
-          convFwd.reset(new convolution_relu_forward(*convReluFwd_pd
-                          , *fwd_bottom_data_primitive, *fwd_weights_data_primitive
-                          , *fwd_bias_data_primitive, *fwd_top_data_memory));
-        } else {
-          convFwd.reset(new convolution_forward(*convFwd_pd
-                          , *fwd_bottom_data_primitive, *fwd_weights_data_primitive
-                          , *fwd_bias_data_primitive, *fwd_top_data_memory));
+        if (fwd_bias_data == NULL) {
+          shared_ptr<MemPD> prv_fwd_bias_data_memory_pd(new MemPD(convFwd_pd->bias_primitive_desc()));
+          if (this->need_quantize_){
+            int count = 1;  //single channel
+            if(this->is_float_ || bottom_is_float){
+              if(this->scale_params_.size() > 1){
+                  count = oc;  //multi channel
+              }
+              std::vector<float> scale_bias(count);
+              #pragma omp parallel for if (count > 1)
+              for(int i=0; i<count; i++){
+                scale_bias[i] = this->scale_in_[0] * this->scale_params_[i];
+              }
+              fwd_bias_data.reset(new MKLDNNData<Dtype>(usr_bias_data_memory_pd, prv_fwd_bias_data_memory_pd, this->blobs_[1].get(), this, true, scale_bias));
+            } else{
+              if(this->fl_params_.size() > 1){
+                  count = oc;  //multi channel
+              }
+              std::vector<int> fl_bias(count);
+              #pragma omp parallel for if (count > 1)
+              for(int i=0; i<count; i++){
+                fl_bias[i] = this->fl_layer_in_[0] + this->fl_params_[i];
+              }
+              fwd_bias_data.reset(new MKLDNNData<Dtype>(usr_bias_data_memory_pd, prv_fwd_bias_data_memory_pd, this->blobs_[1].get(), this, fl_bias));
+            }
+          } else if(bottom_is_float){
+            fwd_bias_data.reset(new MKLDNNData<Dtype>(usr_bias_data_memory_pd, prv_fwd_bias_data_memory_pd, this->blobs_[1].get(), this, false));
+          } else{
+            fwd_bias_data.reset(new MKLDNNData<Dtype>(usr_bias_data_memory_pd, prv_fwd_bias_data_memory_pd, this->blobs_[1].get(), this));
+          }
+          fwd_bias_data->name = "fwd_bias_data     @ " + this->layer_param_.name();
+          fwd_bias_data_primitive = fwd_bias_data->create_input(true);
         }
+        convFwd.reset(new convolution_forward(*convFwd_pd
+                        , *fwd_bottom_data_primitive, *fwd_weights_data_primitive
+                        , *fwd_bias_data_primitive, *fwd_top_data_memory));
         //fwd_bias_data->set_mkldnn_primitive(convFwd);   //Wrong passed primitive! (For sure!)
         MKLDNNPrimitive<Dtype> fwd_bias_data_primitive_transfer(fwd_bias_data_primitive);
         fwd_bias_data->set_mkldnn_primitive(fwd_bias_data_primitive_transfer);
     } else {
-        if(relu) {
-          convFwd.reset(new convolution_relu_forward(*convReluFwd_pd
-                          , *fwd_bottom_data_primitive, *fwd_weights_data_primitive
-                          , *fwd_top_data_memory));
-        } else {
-          convFwd.reset(new convolution_forward(*convFwd_pd
-                          , *fwd_bottom_data_primitive, *fwd_weights_data_primitive
-                          , *fwd_top_data_memory));
-        }
+        convFwd.reset(new convolution_forward(*convFwd_pd
+                        , *fwd_bottom_data_primitive, *fwd_weights_data_primitive
+                        , *fwd_top_data_memory));
     }
     //fwd_bottom_data->set_mkldnn_primitive(convFwd);   //Wrong passed primitive! (For sure!)
     MKLDNNPrimitive<Dtype> fwd_bottom_data_primitive_transfer(fwd_bottom_data_primitive);
@@ -295,7 +537,8 @@ void MKLDNNConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bott
                                                 , const vector<Blob<Dtype>*>& top)
 {
     VLOG(1) << "MKLDNNConvolutionLayer<Dtype>::Forward_cpu: " << this->layer_param_.name();
-    if( convFwd_pd == NULL)
+
+    if( convFwd_pd == NULL || this->reshape)
         InitConvolutionFwd(bottom, top);
     // making reorders if needed.
     fwd_bottom_data->sync_before_read();
@@ -332,8 +575,23 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionBwd(const vector<Blob<Dtype>*
     int32_t kw = this->kernel_w_;
     int32_t kh = this->kernel_h_;
 
-    memory::dims convolutionStrides {this->stride_h_, this->stride_w_};
-    memory::dims padding {this->pad_h_, this->pad_w_};
+    int32_t sw = this->stride_w_;
+    int32_t sh = this->stride_h_;
+
+    int32_t pw = this->pad_w_;
+    int32_t ph = this->pad_h_;
+    memory::dims convolutionStrides {sh, sw};
+    memory::dims padding {ph, pw};
+    memory::dims padding_r;
+    memory::dims dilation;
+    bool dilated_conv = false;
+    const int* dilation_data = this->dilation_.cpu_data();
+    for (int i = 0; i < this->num_spatial_axes_; ++i) {
+      dilation.push_back(dilation_data[i] - 1);
+      if (dilation_data[i] != 1) dilated_conv = true;
+    }
+    padding_r.push_back((oh - 1) * sh - ih + ((kh - 1) * (dilation_data[0]) + 1) - ph);
+    padding_r.push_back((ow - 1) * sw - iw + ((kw - 1) * (dilation_data[1]) + 1) - pw);
 
     // ---- Initialize memory descriptors (fromat = any) to create convolution descriptor -------------
     memory::data_type mpcsn = memory::data_type::f32;
@@ -358,31 +616,48 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionBwd(const vector<Blob<Dtype>*
     unsigned subEngineIndex = 0;
 
     auto eligibleAlgorithms = {conv_algorithm, algorithm::convolution_direct};
+    convBwdData_pd = NULL;
+    convBwdWeights_pd = NULL;
     for (auto &convAlgorithm : eligibleAlgorithms) {
         // ---- Initialize convolution primitive descriptor -------------
         shared_ptr<convolution_backward_data::desc> convBwdData_desc;
         shared_ptr<convolution_backward_weights::desc> convBwdWeights_desc;
         if (this->bias_term_) {
-            convBwdWeights_desc.reset(new convolution_backward_weights::desc(convAlgorithm
+            if (dilated_conv)
+                convBwdWeights_desc.reset(new convolution_backward_weights::desc(convAlgorithm
+                            , init_bottom_md, init_weights_md, init_bias_md, init_top_md
+                            , convolutionStrides, dilation, padding, padding_r, padding_kind::zero));
+            else
+                convBwdWeights_desc.reset(new convolution_backward_weights::desc(convAlgorithm
                             , init_bottom_md, init_weights_md, init_bias_md, init_top_md
                             , convolutionStrides, padding, padding, padding_kind::zero));
         } else {
-            convBwdWeights_desc.reset(new convolution_backward_weights::desc(convAlgorithm
-                                                                             , init_bottom_md, init_weights_md, init_top_md
-                                                                             , convolutionStrides, padding, padding, padding_kind::zero));
+            if (dilated_conv)
+                convBwdWeights_desc.reset(new convolution_backward_weights::desc(convAlgorithm
+                            , init_bottom_md, init_weights_md, init_top_md
+                            , convolutionStrides, dilation, padding, padding_r, padding_kind::zero));
+            else
+                convBwdWeights_desc.reset(new convolution_backward_weights::desc(convAlgorithm
+                            , init_bottom_md, init_weights_md, init_top_md
+                            , convolutionStrides, padding, padding, padding_kind::zero));
         }
        
-        convBwdData_desc.reset(new convolution_backward_data::desc(convAlgorithm
-                                                                   , init_bottom_md, init_weights_md, init_top_md
-                                                                   , convolutionStrides, padding, padding, padding_kind::zero));
+        if (dilated_conv)
+            convBwdData_desc.reset(new convolution_backward_data::desc(convAlgorithm
+                            , init_bottom_md, init_weights_md, init_top_md
+                            , convolutionStrides, dilation, padding, padding_r, padding_kind::zero));
+        else
+            convBwdData_desc.reset(new convolution_backward_data::desc(convAlgorithm
+                            , init_bottom_md, init_weights_md, init_top_md
+                            , convolutionStrides, padding, padding, padding_kind::zero));
 
         for(subEngineIndex=0; subEngineIndex < ep.getNumberOfSubEngines(); subEngineIndex++) {
             try {
                 convBwdData_pd.reset(new convolution_backward_data::primitive_desc(*convBwdData_desc,
-                                                                                   ep.getMKLDNNSubEngine(subEngineIndex), *convFwd_pd));
+                                          ep.getMKLDNNSubEngine(subEngineIndex), *convFwd_pd));
 
                 convBwdWeights_pd.reset(new convolution_backward_weights::primitive_desc(*convBwdWeights_desc,
-                                                                                         ep.getMKLDNNSubEngine(subEngineIndex), *convFwd_pd));
+                                          ep.getMKLDNNSubEngine(subEngineIndex), *convFwd_pd));
             }
             catch(...) {
                 continue;
@@ -441,23 +716,53 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionBwd(const vector<Blob<Dtype>*
     bwdw_weights_diff->name = "bwdw_weights_diff  @ " + this->layer_param_.name();
     bwdw_weights_diff_memory = bwdw_weights_diff->create_output_memory();
 
+    if (Caffe::iter_size() > 1) {
+      // support for (iter_size > 1) weights diff requires additional buffer
+      shared_ptr<MemPD> prv_bwdw_weights_diff_memory_iter_pd(new MemPD(convBwdWeights_pd->diff_weights_primitive_desc()));
+      bwdw_weights_diff_iter.reset(new MKLDNNDiff<Dtype>(usr_weights_data_memory_pd, prv_bwdw_weights_diff_memory_iter_pd, bwdw_weights_diff_iter_blob.get(), this));
+      bwdw_weights_diff_memory_iter = bwdw_weights_diff_iter->create_output_memory();
+    }
+
     if (this->bias_term_) {
         shared_ptr<MemPD> prv_bwdw_bias_diff_memory_pd(new MemPD(convBwdWeights_pd->diff_bias_primitive_desc()));
         bwdw_bias_diff.reset(new MKLDNNDiff<Dtype>(usr_bias_data_memory_pd, prv_bwdw_bias_diff_memory_pd, this->blobs_[1].get(), this));
         bwdw_bias_diff->name = "bwdw_bias_diff     @ " + this->layer_param_.name();
         bwdw_bias_diff_memory = bwdw_bias_diff->create_output_memory();
 
-        convBwdWeights.reset(new convolution_backward_weights(*convBwdWeights_pd
+        if (Caffe::iter_size() > 1) {
+          // support for (iter_size > 1) bias diff requires additional buffer
+          shared_ptr<MemPD> prv_bwdw_bias_diff_memory_iter_pd(new MemPD(convBwdWeights_pd->diff_bias_primitive_desc()));
+          bwdw_bias_diff_iter.reset(new MKLDNNDiff<Dtype>(usr_bias_data_memory_pd, prv_bwdw_bias_diff_memory_iter_pd, bwdw_bias_diff_iter_blob.get(), this));
+          bwdw_bias_diff_memory_iter = bwdw_bias_diff_iter->create_output_memory();
+          convBwdWeights.reset(new convolution_backward_weights(*convBwdWeights_pd
+                        , *bwdw_bottom_data_primitive, *bwdw_top_diff_primitive
+                        , *bwdw_weights_diff_memory_iter, *bwdw_bias_diff_memory_iter));
+        } else {
+          convBwdWeights.reset(new convolution_backward_weights(*convBwdWeights_pd
                         , *bwdw_bottom_data_primitive, *bwdw_top_diff_primitive
                         , *bwdw_weights_diff_memory, *bwdw_bias_diff_memory));
+        }
 
         //bwdw_bias_diff->set_mkldnn_primitive(convBwdWeights);   //Wrong passed primitive! (For sure!)
         MKLDNNPrimitive<Dtype> bwdw_bias_diff_memory_transfer(bwdw_bias_diff_memory);
         bwdw_bias_diff->set_mkldnn_primitive(bwdw_bias_diff_memory_transfer);
+
+        if (Caffe::iter_size() > 1) {
+          // support for (iter_size > 1) bias diff requires additional buffer
+          MKLDNNPrimitive<Dtype> bwdw_bias_diff_memory_iter_transfer(bwdw_bias_diff_memory_iter);
+          bwdw_bias_diff_iter->set_mkldnn_primitive(bwdw_bias_diff_memory_iter_transfer);
+        }
     } else {
-        convBwdWeights.reset(new convolution_backward_weights(*convBwdWeights_pd
+        if (Caffe::iter_size() > 1) {
+          // if (iter_size > 1) then weights diff should be accumulated across iterations
+          convBwdWeights.reset(new convolution_backward_weights(*convBwdWeights_pd
+                        , *bwdw_bottom_data_primitive, *bwdw_top_diff_primitive
+                        , *bwdw_weights_diff_memory_iter));
+        } else {
+          convBwdWeights.reset(new convolution_backward_weights(*convBwdWeights_pd
                         , *bwdw_bottom_data_primitive, *bwdw_top_diff_primitive
                         , *bwdw_weights_diff_memory));
+        }
     }
 
     convBwdData.reset(new convolution_backward_data(*convBwdData_pd
@@ -476,7 +781,6 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionBwd(const vector<Blob<Dtype>*
     MKLDNNPrimitive<Dtype> bwdd_weights_data_primitive_transfer(bwdd_weights_data_primitive);
     bwdd_weights_data->set_mkldnn_primitive(bwdd_weights_data_primitive_transfer);
 
-
     //bwdw_bottom_data->set_mkldnn_primitive(convBwdWeights);   //Wrong passed primitive! (TODO: Checking!)
     MKLDNNPrimitive<Dtype> bwdw_bottom_data_primitive_transfer(bwdw_bottom_data_primitive);
     bwdw_bottom_data->set_mkldnn_primitive(bwdw_bottom_data_primitive_transfer);
@@ -489,6 +793,12 @@ void MKLDNNConvolutionLayer<Dtype>::InitConvolutionBwd(const vector<Blob<Dtype>*
     MKLDNNPrimitive<Dtype> bwdw_weights_diff_memory_transfer(bwdw_weights_diff_memory);
     bwdw_weights_diff->set_mkldnn_primitive(bwdw_weights_diff_memory_transfer);
 
+    if (Caffe::iter_size() > 1) {
+      // support for (iter_size > 1) weights diff requires additional buffer
+      MKLDNNPrimitive<Dtype> bwdw_weights_diff_memory_iter_transfer(bwdw_weights_diff_memory_iter);
+      bwdw_weights_diff_iter->set_mkldnn_primitive(bwdw_weights_diff_memory_iter_transfer);
+    }
+
     // Names are for debugging purposes only.
 }
 
@@ -499,7 +809,9 @@ void MKLDNNConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top
                                                 , const vector<Blob<Dtype>*>& bottom)
 {
     VLOG(1) << "MKLDNNConvolutionLayer<Dtype>::Backward_cpu: " << this->layer_param_.name();
-    if( convBwdData_pd == NULL)
+    bool top_diff_is_prv = (const_cast<Dtype*>(top[0]->prv_diff()) != NULL);
+
+    if( convBwdData_pd == NULL || this->reshape)
         InitConvolutionBwd(top, propagate_down, bottom);
     if (propagate_down[0]) {
         // making reorders if needed.
@@ -557,6 +869,13 @@ void MKLDNNConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top
         PERFORMANCE_MEASUREMENT_END_ID(perf_id_bw_);
     }
     if (this->param_propagate_down(0)) {
+        // We have to sync top diff to cpu explicitly. This is used to make
+        // bwdw_top_diff->sync_before_read() have chance to get coverted data as
+        // bwdd_top_diff->sync_before_read() have updated top diff's prv_data
+        // to self. This issue only happens when MKLDNN conv layer is followed
+        // by a CAFFE layer and conversion is needed.
+        if (!top_diff_is_prv && propagate_down[0])
+          top[0]->mutable_cpu_diff();
         // making reorders if needed.
         bwdw_top_diff->sync_before_read();
         bwdw_bottom_data->sync_before_read();
@@ -571,6 +890,34 @@ void MKLDNNConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top
         PERFORMANCE_MEASUREMENT_BEGIN();
         convBwdWeights.submit();
         PERFORMANCE_MEASUREMENT_END_ID(perf_id_bw_weights_);
+
+        if (Caffe::iter_size() > 1) {
+          // if (iter_size > 1) then weights diff should be accumulated across iterations
+          if (this->blobs_[0]->prv_diff() != NULL) {
+            caffe_axpy(this->blobs_[0]->prv_diff_count(), Dtype(1),
+              (Dtype*)(bwdw_weights_diff_memory_iter->get_data_handle()),
+              this->blobs_[0]->mutable_prv_diff());
+          } else {
+            caffe_axpy(this->blobs_[0]->count(), Dtype(1),
+              (Dtype*)(bwdw_weights_diff_memory_iter->get_data_handle()),
+              this->blobs_[0]->mutable_cpu_diff());
+          }
+        }
+
+        if (this->param_propagate_down(1)) {
+          if (Caffe::iter_size() > 1) {
+            // if (iter_size > 1) then bias diff should be accumulated across iterations
+            if (this->blobs_[1]->prv_diff() != NULL) {
+              caffe_axpy(this->blobs_[1]->prv_diff_count(), Dtype(1),
+                (Dtype*)(bwdw_bias_diff_memory_iter->get_data_handle()),
+                this->blobs_[1]->mutable_prv_diff());
+            } else {
+              caffe_axpy(this->blobs_[1]->count(), Dtype(1),
+                (Dtype*)(bwdw_bias_diff_memory_iter->get_data_handle()),
+                this->blobs_[1]->mutable_cpu_diff());
+            }
+          }
+        }
     }
 }
 

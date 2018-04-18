@@ -80,8 +80,9 @@ typedef boost::function<SolverAction::Enum()> ActionCallback;
 template <typename Dtype>
 class Solver {
  public:
-  explicit Solver(const SolverParameter& param);
-  explicit Solver(const string& param_file);
+  explicit Solver(const SolverParameter& param,
+      const Solver* root_solver = NULL);
+  explicit Solver(const string& param_file, const Solver* root_solver = NULL);
   void Init(const SolverParameter& param);
   void InitTrainNet();
   void InitTestNets();
@@ -103,33 +104,22 @@ class Solver {
   // RestoreSolverStateFrom___ protected methods. You should implement these
   // methods to restore the state from the appropriate snapshot type.
   void Restore(const char* resume_file);
-  // The Solver::Snapshot function implements the basic snapshotting utility
-  // that stores the learned net. You should implement the SnapshotSolverState()
-  // function that produces a SolverState protocol buffer that needs to be
-  // written to disk together with the learned net.
-  void Snapshot();
   virtual ~Solver() {}
   inline const SolverParameter& param() const { return param_; }
+  inline SolverParameter& param() { return param_; }
   inline shared_ptr<Net<Dtype> > net() { return net_; }
   inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
     return test_nets_;
   }
-  int iter() const { return iter_; }
-  int max_iter() const { return param_.max_iter(); }
+  int iter() { return iter_; }
   void set_iter(int value) { iter_ = value; }
+  void increment_iter() { iter_++; }
 
   // Invoked at specific points during an iteration
   class Callback {
    protected:
     virtual void on_start() = 0;
     virtual void on_gradients_ready() = 0;
-
-#ifdef USE_MLSL
-    virtual void on_before_test() {}
-    virtual void on_after_test() {}
-    virtual void on_before_snapshot() {}
-    virtual void on_after_snapshot() {}
-#endif
 
     template <typename T>
     friend class Solver;
@@ -150,40 +140,25 @@ class Solver {
    */
   virtual inline const char* type() const { return ""; }
 
+  // The Solver::Snapshot function implements the basic snapshotting utility
+  // that stores the learned net. You should implement the SnapshotSolverState()
+  // function that produces a SolverState protocol buffer that needs to be
+  // written to disk together with the learned net.
+  void Snapshot();
+
   // Make and apply the update value for the current iteration.
   virtual void ApplyUpdate() = 0;
   virtual void ApplyUpdate(int param_id) = 0;
+  // Print learning rate to logs
+  virtual void PrintLearningRate() = 0;
 
-#ifdef CAFFE_PER_LAYER_TIMINGS
-  /* Timers for performance measurements */
-  Timer timer;
-  std::vector<double> forward_time_per_layer;
-  std::vector<double> backward_time_per_layer;
-  std::vector<double> update_time_per_layer;
-#ifdef USE_MLSL
-  std::vector<double> startcomm_time_per_layer;
-  std::vector<double> waitcomm_time_per_layer;
-#endif
-
-  std::vector<double> forward_time_per_layer_total;
-  std::vector<double> backward_time_per_layer_total;
-  std::vector<double> update_time_per_layer_total;
-#ifdef USE_MLSL
-  std::vector<double> startcomm_time_per_layer_total;
-  std::vector<double> waitcomm_time_per_layer_total;
-#endif
-
-  void InitTimers();
-  void ResetTimers();
-  void PrintTimers(bool printTotal);
-#endif /* CAFFE_PER_LAYER_TIMINGS */
+  void TestAll();
 
  protected:
   string SnapshotFilename(const string extension);
   string SnapshotToBinaryProto();
   string SnapshotToHDF5();
   // The test routine
-  void TestAll();
   void Test(const int test_net_id = 0);
   void TestClassification(const int test_net_id = 0);
   void TestDetection(const int test_net_id = 0);
@@ -202,6 +177,10 @@ class Solver {
   vector<Dtype> losses_;
   Dtype smoothed_loss_;
 
+  // The root solver that holds root nets (actually containing shared layers)
+  // in data parallelism
+  const Solver* const root_solver_;
+
   // A function that can be set by a client of the Solver to provide indication
   // that it wants a snapshot saved and/or to exit early.
   ActionCallback action_request_function_;
@@ -211,11 +190,32 @@ class Solver {
 
   ForwardBackwardFunc forward_backward_;
 
-  // Timing information, handy to tune e.g. nbr of GPUs
-  Timer iteration_timer_;
-  float iterations_last_;
-
   DISABLE_COPY_AND_ASSIGN(Solver);
+};
+
+/**
+ * @brief Solver that only computes gradients, used as worker
+ *        for multi-GPU training.
+ */
+template <typename Dtype>
+class WorkerSolver : public Solver<Dtype> {
+ public:
+  explicit WorkerSolver(const SolverParameter& param,
+      const Solver<Dtype>* root_solver = NULL)
+      : Solver<Dtype>(param, root_solver) {}
+
+ protected:
+  void ApplyUpdate() { }
+  void ApplyUpdate(int param_id) { }
+  void SnapshotSolverState(const string& model_filename) {
+    LOG(FATAL) << "Should not be called on worker solver.";
+  }
+  void RestoreSolverStateFromBinaryProto(const string& state_file) {
+    LOG(FATAL) << "Should not be called on worker solver.";
+  }
+  void RestoreSolverStateFromHDF5(const string& state_file) {
+    LOG(FATAL) << "Should not be called on worker solver.";
+  }
 };
 
 }  // namespace caffe

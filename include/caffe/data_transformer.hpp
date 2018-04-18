@@ -51,6 +51,8 @@ using google::protobuf::RepeatedPtrField;
 
 namespace caffe {
 
+class DataReader;
+
 class RandNumbers {
  public:
    /**
@@ -349,6 +351,8 @@ class DataTransformer {
  protected:
   GenRandNumbers rand_num_;
 
+  void Transform(const Datum& datum, Dtype* transformed_data);
+
   // Transform and return the transformation information.
   template<typename AnnotationHandler = EmptyType>
   void Transform(const Datum& datum, Dtype* transformed_data,
@@ -374,6 +378,9 @@ class DataTransformer {
   Blob<Dtype> data_mean_;
   vector<Dtype> mean_values_;
 
+  // Data reader used if any to get data
+  DataReader* data_reader_used;
+
 
  private:
   void Transform(const Datum& datum, Dtype* transformed_data,
@@ -395,6 +402,8 @@ class DataTransformer {
 #ifdef USE_OPENCV
   void RandomResizeImage(const Datum& datum, Datum *resized_datum);
   void RandomResizeImage(const cv::Mat& img, cv::Mat *resized_img);
+  void RandomAlterAspectRatio(const Datum& datum, Datum *resized_datum);
+  void RandomAlterAspectRatio(const cv::Mat& img, cv::Mat *resized_img);
 #endif
 };
 
